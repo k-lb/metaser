@@ -1,0 +1,19 @@
+package metaser
+
+import "k8s.io/apimachinery/pkg/util/validation/field"
+
+type decodeError struct {
+	message     string
+	fieldErrors field.ErrorList
+}
+
+func (de *decodeError) Error() string {
+	return de.message
+}
+
+func GetErrorList(err error) field.ErrorList {
+	if de, ok := err.(*decodeError); ok {
+		return de.fieldErrors
+	}
+	return nil
+}
