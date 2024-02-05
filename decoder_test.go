@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2023 Samsung Electronics Co., Ltd All Rights Reserved
+Copyright (c) 2023 - 2024 Samsung Electronics Co., Ltd All Rights Reserved
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -656,5 +656,104 @@ var _ = Describe("Decoder with GenerateFieldsErrors enabled", func() {
 			Expect(GetErrorList(err)).To(HaveLen(3))
 			Expect(err.Error()).ToNot(BeEmpty())
 		})
+	})
+})
+
+var _ = Describe("Decoder with ImmutabilityVerification enabled", func() {
+	Context("In case struct tags contains field with immutable annotation reference", func() {
+		It("should return no error when struct values are equal to values from annotation", func() {
+			s := struct {
+				MyKey  int     `k8s:"annotation:one,immutable"`
+				MyKey2 float32 `k8s:"annotation:two,immutable"`
+				MyKey3 bool    `k8s:"annotation:three,immutable"`
+				MyKey4 string  `k8s:"annotation:four,immutable"`
+			}{
+				MyKey:  1,
+				MyKey2: 2.0,
+				MyKey3: true,
+				MyKey4: "hello",
+			}
+			m := &metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"one":   "1",
+					"two":   "2.0",
+					"three": "true",
+					"four":  "hello",
+				},
+			}
+			dec := NewDecoder(m)
+			dec.ImmutabilityVerification = true
+			err := dec.Decode(&s)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(s.MyKey).To(Equal(1))
+			Expect(s.MyKey2).To(Equal(float32(2.0)))
+			Expect(s.MyKey3).To(Equal(true))
+			Expect(s.MyKey4).To(Equal("hello"))
+		})
+		It("should return errors when struct values are not equal to values from annotation", func() {
+			s := struct {
+				MyKey  int     `k8s:"annotation:one,immutable"`
+				MyKey2 float32 `k8s:"annotation:two,immutable"`
+				MyKey3 bool    `k8s:"annotation:three,immutable"`
+				MyKey4 string  `k8s:"annotation:four,immutable"`
+			}{
+				MyKey:  2,
+				MyKey2: 3.0,
+				MyKey3: false,
+				MyKey4: "hello2",
+			}
+			m := &metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"one":   "1",
+					"two":   "2.0",
+					"three": "true",
+					"four":  "hello",
+				},
+			}
+			dec := NewDecoder(m)
+			dec.AccumulateFieldErrors = true
+			dec.ImmutabilityVerification = true
+			err := dec.Decode(&s)
+			Expect(err).To(HaveOccurred())
+			Expect(s.MyKey).To(Equal(2))
+			Expect(s.MyKey2).To(Equal(float32(3.0)))
+			Expect(s.MyKey3).To(Equal(false))
+			Expect(s.MyKey4).To(Equal("hello2"))
+			Expect(GetErrorList(err)).ToNot(BeNil())
+			Expect(GetErrorList(err)).To(HaveLen(4))
+			Expect(err.Error()).ToNot(BeEmpty())
+		})
+	})
+})
+
+var _ = Describe("Decoder with ImmutabilityVerification disabled", func() {
+	It("should return no errors when struct values are not equal to values from annotation", func() {
+		s := struct {
+			MyKey  int     `k8s:"annotation:one,immutable"`
+			MyKey2 float32 `k8s:"annotation:two,immutable"`
+			MyKey3 bool    `k8s:"annotation:three,immutable"`
+			MyKey4 string  `k8s:"annotation:four,immutable"`
+		}{
+			MyKey:  2,
+			MyKey2: 3.0,
+			MyKey3: false,
+			MyKey4: "hello2",
+		}
+		m := &metav1.ObjectMeta{
+			Annotations: map[string]string{
+				"one":   "1",
+				"two":   "2.0",
+				"three": "true",
+				"four":  "hello",
+			},
+		}
+		dec := NewDecoder(m)
+		dec.AccumulateFieldErrors = true
+		err := dec.Decode(&s)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(s.MyKey).To(Equal(1))
+		Expect(s.MyKey2).To(Equal(float32(2.0)))
+		Expect(s.MyKey3).To(Equal(true))
+		Expect(s.MyKey4).To(Equal("hello"))
 	})
 })

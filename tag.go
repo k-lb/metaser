@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2023 Samsung Electronics Co., Ltd All Rights Reserved
+Copyright (c) 2023 - 2024 Samsung Electronics Co., Ltd All Rights Reserved
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ type parsedTag struct {
 	value     string
 	inline    bool
 	omitempty bool
+	immutable bool
 }
 
 func parseEncoding(expr string) (encoder, error) {
@@ -53,6 +54,7 @@ func parseTag(tag reflect.StructTag) (pt *parsedTag, err error) {
 		value:     "",
 		inline:    false,
 		omitempty: false,
+		immutable: false,
 	}
 
 	k8sTag := ""
@@ -85,6 +87,8 @@ func parseTag(tag reflect.StructTag) (pt *parsedTag, err error) {
 			pt.omitempty = true
 		case customKey:
 			pt.source = custom
+		case immutableKey:
+			pt.immutable = true
 		default:
 			// handle key:value pairs
 			keyvals := strings.Split(f, ":")

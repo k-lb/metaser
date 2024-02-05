@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2023 Samsung Electronics Co., Ltd All Rights Reserved
+Copyright (c) 2023 - 2024 Samsung Electronics Co., Ltd All Rights Reserved
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -40,6 +40,11 @@ type Decoder struct {
 	// Aditionally when True, the Decoder will not stop on first encountered deserialization error,
 	// but instead will traverse fields to gather all possible decoding errors.
 	AccumulateFieldErrors bool
+
+	// ImmutabilityVerification will force metaser to check 'immutable' tags during Decode().
+	// This option can be set true during Webhook's verification routines to check
+	// if immutable field did not change accross oldObject and Object.
+	ImmutabilityVerification bool
 
 	fieldErrors field.ErrorList
 }
@@ -250,7 +255,12 @@ func decode(out reflect.Value, in string, enc encoder) error {
 	return nil
 }
 
+func (dec *Decoder) equal(v1, v2 reflect.Value) bool {
+	return reflect.DeepEqual(v1.Interface(), v2.Interface())
+}
+
 func (dec *Decoder) decodeField(dv *structField) error {
+	var cv reflect.Value
 	tag, err := parseTag(dv.tag)
 	if err != nil {
 		return fmt.Errorf("unable to parse tag '%s': [%w]", string(dv.tag), err)
@@ -262,6 +272,11 @@ func (dec *Decoder) decodeField(dv *structField) error {
 	if tag.inline {
 		dec.values = appendValues(dec.values, dv.value)
 		return nil
+	}
+
+	if dec.ImmutabilityVerification && tag.immutable {
+		cv = reflect.New(dv.value.Type()).Elem()
+		dv.value, cv = cv, dv.value
 	}
 
 	switch tag.source {
@@ -281,6 +296,12 @@ func (dec *Decoder) decodeField(dv *structField) error {
 		err = decodeCustom(dv.value, dec.in)
 	}
 
+	if dec.ImmutabilityVerification && tag.immutable {
+		if !dec.equal(dv.value, cv) {
+			err = errors.Join(err, fmt.Errorf("field is immutable"))
+		}
+	}
+
 	if err != nil && dec.AccumulateFieldErrors {
 		dec.fieldErrors = append(dec.fieldErrors, field.TypeInvalid(field.NewPath("metadata").Child(tag.source.String()),
 			tag.value, err.Error()))
@@ -288,7 +309,7 @@ func (dec *Decoder) decodeField(dv *structField) error {
 	}
 
 	if err != nil {
-		return fmt.Errorf("%s %s: [%w]", tag.source, tag.value, err)
+		return fmt.Errorf("%s '%s': [%w]", tag.source, tag.value, err)
 	}
 
 	return nil
@@ -327,7 +348,7 @@ func NewDecoder(meta *metav1.ObjectMeta) *Decoder {
 	}
 }
 
-// Unmarshal reads data from K8s object metadata and stores them in v.
+// Unmarshal reads data from K8s object metadata using default Decoder.
 func Unmarshal(meta *metav1.ObjectMeta, v any) error {
 	return NewDecoder(meta).Decode(v)
 }
