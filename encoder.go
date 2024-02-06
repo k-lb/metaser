@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2023 Samsung Electronics Co., Ltd All Rights Reserved
+Copyright (c) 2023 - 2024 Samsung Electronics Co., Ltd All Rights Reserved
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ type Encoder struct {
 }
 
 func encodeUsingTextMarshaler(in reflect.Value) (string, error) {
-	fun := findMethodByName(in, "MarshalText")
+	fun := method(in, "MarshalText")
 	if !fun.IsValid() || fun.IsZero() {
 		return "", fmt.Errorf("type '%s' or '*%s' doesn't implement encoding.TextMarshaler interface", in.Type().Name(), in.Type().Name())
 	}
@@ -204,7 +204,7 @@ func encodeCustom(out reflect.Value, meta *metav1.ObjectMeta) error {
 		return nil
 	}
 
-	fun = findMethodByName(out, "MarshalToMetadata")
+	fun = method(out, "MarshalToMetadata")
 	if !fun.IsValid() || fun.IsZero() {
 		return fmt.Errorf("type '%s' or '*%s' doesn't implement metaser.MetadataMarshaler interface", out.Type().Name(), out.Type().Name())
 	}
@@ -220,25 +220,17 @@ func encodeCustom(out reflect.Value, meta *metav1.ObjectMeta) error {
 
 func (enc *Encoder) encodeField(dv *structField) error {
 	var val string
-	tag, err := parseTag(dv.tag)
-	if err != nil {
-		return fmt.Errorf("unable to parse tag '%s': [%w]", string(dv.tag), err)
-	}
+	var err error
 
-	if tag == nil || tag.dir == in {
+	if dv.tag == nil || dv.tag.dir == in {
 		return nil
 	}
 
-	if dv.value.IsZero() && tag.omitempty {
+	if dv.value.IsZero() && dv.tag.omitempty {
 		return nil
 	}
 
-	if tag.inline {
-		enc.values = appendValues(enc.values, dv.value)
-		return nil
-	}
-
-	switch tag.source {
+	switch dv.tag.source {
 	case name:
 		if val, err = encodePrimitive(dv.value); err == nil {
 			enc.out.Name = val
@@ -248,12 +240,12 @@ func (enc *Encoder) encodeField(dv *structField) error {
 			enc.out.Namespace = val
 		}
 	case label:
-		if val, err = encode(dv.value, tag.enc); err == nil {
-			enc.out.Labels[tag.value] = val
+		if val, err = encode(dv.value, dv.tag.enc); err == nil {
+			enc.out.Labels[dv.tag.value] = val
 		}
 	case annotation:
-		if val, err = encode(dv.value, tag.enc); err == nil {
-			enc.out.Annotations[tag.value] = val
+		if val, err = encode(dv.value, dv.tag.enc); err == nil {
+			enc.out.Annotations[dv.tag.value] = val
 		}
 	case custom:
 		err = encodeCustom(dv.value, enc.out)
@@ -262,33 +254,65 @@ func (enc *Encoder) encodeField(dv *structField) error {
 	return err
 }
 
+func appendFieldValues(values []structField, v reflect.Value) ([]structField, error) {
+	v = dereference(v)
+
+	if v.Kind() != reflect.Struct {
+		return values, nil
+	}
+
+	for i := 0; i < v.NumField(); i++ {
+		ptag, err := parseTag(v.Type().Field(i).Tag)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, structField{
+			value: v.Field(i),
+			tag:   ptag,
+		})
+	}
+	return values, nil
+}
+
 // Encode reads data from v and writes it into K8s object metadata.
 //
 // See package documentation for details about serialization.
-func (enc *Encoder) Encode(v any) error {
-	enc.values = appendValues(enc.values, reflect.ValueOf(v))
+func (enc *Encoder) Encode(v any, meta *metav1.ObjectMeta) error {
+	var err error
+	enc.out = meta
+	value := reflect.ValueOf(v)
 
-	for {
-		if len(enc.values) == 0 {
-			break
-		}
+	if value.Kind() != reflect.Pointer {
+		return fmt.Errorf("expected pointer to value")
+	}
+
+	enc.values, err = appendFieldValues(enc.values, value)
+	if err != nil {
+		return err
+	}
+
+	for len(enc.values) > 0 {
 		v := enc.values[len(enc.values)-1]
 		enc.values = enc.values[:len(enc.values)-1]
-		if err := enc.encodeField(&v); err != nil {
+		if err = enc.encodeField(&v); err != nil {
 			return fmt.Errorf("unable to process value: [%w]", err)
+		}
+
+		if v.tag != nil && v.tag.inline {
+			if enc.values, err = appendFieldValues(enc.values, v.value); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
 // NewEncoder returns new Encoder that writes data into meta.
-func NewEncoder(meta *metav1.ObjectMeta) *Encoder {
-	return &Encoder{
-		out: meta,
-	}
+func NewEncoder() *Encoder {
+	return &Encoder{}
 }
 
 // Marshal reads data from v and writes it into K8s object metadata using default Encoder.
 func Marshal(v any, meta *metav1.ObjectMeta) error {
-	return NewEncoder(meta).Encode(v)
+	return NewEncoder().Encode(v, meta)
 }

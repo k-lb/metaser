@@ -244,6 +244,24 @@ var _ = Describe("Decoder", func() {
 				Expect(*s.A.MyKey).To(Equal("myvalue"))
 			})
 		})
+		When("struct have struct pointer field with reference to annotation", func() {
+			It("should match annotation from metadata", func() {
+				s := struct {
+					A *struct {
+						MyKey string `k8s:"annotation:mykey"`
+					} `k8s:"inline"`
+				}{}
+				m := &metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"mykey": "myvalue",
+					},
+				}
+				err := Unmarshal(m, &s)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(s.A.MyKey).ToNot(BeNil())
+				Expect(s.A.MyKey).To(Equal("myvalue"))
+			})
+		})
 		When("struct have bool field with reference to annotation", func() {
 			It("should match annotation from metadata", func() {
 				s := struct {
@@ -648,9 +666,9 @@ var _ = Describe("Decoder with GenerateFieldsErrors enabled", func() {
 					"three": "6",
 				},
 			}
-			dec := NewDecoder(m)
+			dec := NewDecoder()
 			dec.AccumulateFieldErrors = true
-			err := dec.Decode(&s)
+			err := dec.Decode(m, &s)
 			Expect(err).To(HaveOccurred())
 			Expect(GetErrorList(err)).ToNot(BeNil())
 			Expect(GetErrorList(err)).To(HaveLen(3))
@@ -681,9 +699,9 @@ var _ = Describe("Decoder with ImmutabilityVerification enabled", func() {
 					"four":  "hello",
 				},
 			}
-			dec := NewDecoder(m)
+			dec := NewDecoder()
 			dec.ImmutabilityVerification = true
-			err := dec.Decode(&s)
+			err := dec.Decode(m, &s)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(s.MyKey).To(Equal(1))
 			Expect(s.MyKey2).To(Equal(float32(2.0)))
@@ -710,10 +728,10 @@ var _ = Describe("Decoder with ImmutabilityVerification enabled", func() {
 					"four":  "hello",
 				},
 			}
-			dec := NewDecoder(m)
+			dec := NewDecoder()
 			dec.AccumulateFieldErrors = true
 			dec.ImmutabilityVerification = true
-			err := dec.Decode(&s)
+			err := dec.Decode(m, &s)
 			Expect(err).To(HaveOccurred())
 			Expect(s.MyKey).To(Equal(2))
 			Expect(s.MyKey2).To(Equal(float32(3.0)))
@@ -747,13 +765,61 @@ var _ = Describe("Decoder with ImmutabilityVerification disabled", func() {
 				"four":  "hello",
 			},
 		}
-		dec := NewDecoder(m)
+		dec := NewDecoder()
 		dec.AccumulateFieldErrors = true
-		err := dec.Decode(&s)
+		err := dec.Decode(m, &s)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(s.MyKey).To(Equal(1))
 		Expect(s.MyKey2).To(Equal(float32(2.0)))
 		Expect(s.MyKey3).To(Equal(true))
 		Expect(s.MyKey4).To(Equal("hello"))
+	})
+})
+
+var _ = Describe("Decoding embedded structs", func() {
+	It("should return no errors", func() {
+		type DummyA struct {
+			A string
+		}
+		type DummyB struct {
+			A string
+		}
+		type DummyC struct {
+			A string
+		}
+		type A struct {
+			DummyA
+			Z int
+			X string `k8s:"annotation:iks"`
+			V int
+		}
+		type B struct {
+			DummyB
+			Z int
+			A `k8s:"inline"`
+			V int
+		}
+		type C struct {
+			Z int
+			B `k8s:"inline"`
+			V int
+		}
+		type D struct {
+			DummyC
+			DummyA
+			Z int
+			C `k8s:"inline"`
+			V int
+		}
+		m := &metav1.ObjectMeta{
+			Annotations: map[string]string{
+				"iks": "test",
+			},
+		}
+		v := D{}
+		dec := NewDecoder()
+		err := dec.Decode(m, &v)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(v.C.B.A.X).To(Equal("test"))
 	})
 })

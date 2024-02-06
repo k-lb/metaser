@@ -32,8 +32,7 @@ import (
 
 // Decoder reads and decodes data from Kubernets Object's metatdata
 type Decoder struct {
-	in     *metav1.ObjectMeta
-	values []structField
+	in *metav1.ObjectMeta
 
 	// indidacte if during Decode() the Decoder should generate ErrorList.
 	// The ErrorList can be obtained by GetErrorList() method called on returned error.
@@ -47,6 +46,21 @@ type Decoder struct {
 	ImmutabilityVerification bool
 
 	fieldErrors field.ErrorList
+	cache       fastAccessCache
+}
+
+type fieldInfo struct {
+	path []int
+	tag  parsedTag
+}
+
+type fastAccessCache struct {
+	CachedType             reflect.Type
+	NameFastAccess         []fieldInfo
+	NamespaceFastAccess    []fieldInfo
+	AnnotationFastAccess   map[string][]fieldInfo
+	LabelsFastAccess       map[string][]fieldInfo
+	CustomFieldsFastAccess []fieldInfo
 }
 
 func assignToBool(out reflect.Value, in string) error {
@@ -190,7 +204,7 @@ func decodeUsingTextUnmarshaler(out reflect.Value, in string) error {
 		out.Set(reflect.New(out.Type().Elem()))
 	}
 
-	fun = findMethodByName(out, "UnmarshalText")
+	fun = method(out, "UnmarshalText")
 	if !fun.IsValid() || fun.IsZero() {
 		return fmt.Errorf("type '%s' nor '*%s' doesn't implement encoding.TextUnmarshaler", out.Type().Name(), out.Type().Name())
 	}
@@ -231,7 +245,7 @@ func decodeCustom(out reflect.Value, meta *metav1.ObjectMeta) error {
 		out.Set(reflect.New(out.Type().Elem()))
 	}
 
-	fun = findMethodByName(out, "UnmarshalFromMetadata")
+	fun = method(out, "UnmarshalFromMetadata")
 	if !fun.IsValid() || fun.IsZero() {
 		return fmt.Errorf("type '%s' nor '*%s' doesn't implement metaser.MetadataUnmarshaler", out.Type().Name(), out.Type().Name())
 	}
@@ -259,45 +273,43 @@ func (dec *Decoder) equal(v1, v2 reflect.Value) bool {
 	return reflect.DeepEqual(v1.Interface(), v2.Interface())
 }
 
-func (dec *Decoder) decodeField(dv *structField) error {
+func (dec *Decoder) decodeField(tag *parsedTag, v reflect.Value) error {
 	var cv reflect.Value
-	tag, err := parseTag(dv.tag)
-	if err != nil {
-		return fmt.Errorf("unable to parse tag '%s': [%w]", string(dv.tag), err)
-	}
+	var err error
+
 	if tag == nil || tag.dir == out {
 		return nil
 	}
 
 	if tag.inline {
-		dec.values = appendValues(dec.values, dv.value)
+		// will be handled by other structField
 		return nil
 	}
 
 	if dec.ImmutabilityVerification && tag.immutable {
-		cv = reflect.New(dv.value.Type()).Elem()
-		dv.value, cv = cv, dv.value
+		cv = reflect.New(v.Type()).Elem()
+		v, cv = cv, v
 	}
 
 	switch tag.source {
 	case name:
-		err = decodePrimitive(dv.value, dec.in.Name)
+		err = decodePrimitive(v, dec.in.Name)
 	case namespace:
-		err = decodePrimitive(dv.value, dec.in.Namespace)
+		err = decodePrimitive(v, dec.in.Namespace)
 	case label:
 		if val, ok := dec.in.Labels[tag.value]; ok {
-			err = decode(dv.value, val, tag.enc)
+			err = decode(v, val, tag.enc)
 		}
 	case annotation:
 		if val, ok := dec.in.Annotations[tag.value]; ok {
-			err = decode(dv.value, val, tag.enc)
+			err = decode(v, val, tag.enc)
 		}
 	case custom:
-		err = decodeCustom(dv.value, dec.in)
+		err = decodeCustom(v, dec.in)
 	}
 
 	if dec.ImmutabilityVerification && tag.immutable {
-		if !dec.equal(dv.value, cv) {
+		if !dec.equal(v, cv) {
 			err = errors.Join(err, fmt.Errorf("field is immutable"))
 		}
 	}
@@ -315,21 +327,131 @@ func (dec *Decoder) decodeField(dv *structField) error {
 	return nil
 }
 
+func (dec *Decoder) buildCache(root reflect.Value) error {
+	if dec.cache.CachedType == root.Type() {
+		return nil
+	}
+
+	dec.cache = fastAccessCache{
+		AnnotationFastAccess: map[string][]fieldInfo{},
+		LabelsFastAccess:     map[string][]fieldInfo{},
+	}
+
+	err := visit(root.Type(), func(t reflect.Type, path []int) (bool, error) {
+		if t.Kind() == reflect.Pointer {
+			return true, nil
+		}
+		if t.Kind() != reflect.Struct {
+			return false, nil
+		}
+		recurse := false
+		for i := 0; i < t.NumField(); i++ {
+			pt, err := parseTag(t.Field(i).Tag)
+			if err != nil {
+				return false, err
+			}
+			if pt == nil {
+				continue
+			}
+			recurse = true
+			item := fieldInfo{append(path, i), *pt}
+			switch pt.source {
+			case name:
+				dec.cache.NameFastAccess = append(dec.cache.NameFastAccess, item)
+			case namespace:
+				dec.cache.NamespaceFastAccess = append(dec.cache.NamespaceFastAccess, item)
+			case annotation:
+				v := dec.cache.AnnotationFastAccess[pt.value]
+				v = append(v, item)
+				dec.cache.AnnotationFastAccess[pt.value] = v
+			case label:
+				v := dec.cache.LabelsFastAccess[pt.value]
+				v = append(v, item)
+				dec.cache.LabelsFastAccess[pt.value] = v
+			case custom:
+				dec.cache.CustomFieldsFastAccess = append(dec.cache.CustomFieldsFastAccess, item)
+			}
+			recurse = recurse || pt.inline
+		}
+		return recurse, nil
+	})
+	if err == nil {
+		dec.cache.CachedType = root.Type()
+	}
+	return err
+}
+
+func fieldByIndexWithAlloc(v reflect.Value, index []int) reflect.Value {
+	if len(index) == 1 {
+		return v.Field(index[0])
+	}
+	for i, x := range index {
+		if i > 0 {
+			if v.Type().Kind() == reflect.Pointer && v.Type().Elem().Kind() == reflect.Struct {
+				if v.IsNil() {
+					v.Set(reflect.New(v.Type().Elem()))
+				}
+				v = v.Elem()
+			}
+		}
+		v = v.Field(x)
+	}
+	return v
+}
+
 // Decode reads data from K8s object metadata and stores them in v.
 //
 // See package documentation for details about deserialization.
-func (dec *Decoder) Decode(v any) error {
-	dec.values = appendValues(dec.values, reflect.ValueOf(v))
+func (dec *Decoder) Decode(meta *metav1.ObjectMeta, v any) error {
+	dec.in = meta
 	dec.fieldErrors = field.ErrorList{}
 
-	for {
-		if len(dec.values) == 0 {
-			break
-		}
-		v := dec.values[len(dec.values)-1]
-		dec.values = dec.values[:len(dec.values)-1]
+	root := reflect.ValueOf(v)
 
-		if err := dec.decodeField(&v); err != nil {
+	if root.Kind() != reflect.Pointer {
+		return fmt.Errorf("expected pointer to value")
+	}
+
+	if err := dec.buildCache(root); err != nil {
+		return err
+	}
+
+	root = dereference(root)
+
+	for _, info := range dec.cache.NameFastAccess {
+		if err := dec.decodeField(&info.tag, fieldByIndexWithAlloc(root, info.path)); err != nil {
+			return fmt.Errorf("unable to decode value: [%w]", err)
+		}
+	}
+
+	for _, info := range dec.cache.NamespaceFastAccess {
+		if err := dec.decodeField(&info.tag, fieldByIndexWithAlloc(root, info.path)); err != nil {
+			return fmt.Errorf("unable to decode value: [%w]", err)
+		}
+	}
+
+	for key := range dec.in.Annotations {
+		if list, ok := dec.cache.AnnotationFastAccess[key]; ok {
+			for _, info := range list {
+				if err := dec.decodeField(&info.tag, fieldByIndexWithAlloc(root, info.path)); err != nil {
+					return fmt.Errorf("unable to decode value: [%w]", err)
+				}
+			}
+		}
+	}
+
+	for key := range dec.in.Labels {
+		if list, ok := dec.cache.LabelsFastAccess[key]; ok {
+			for _, info := range list {
+				if err := dec.decodeField(&info.tag, fieldByIndexWithAlloc(root, info.path)); err != nil {
+					return fmt.Errorf("unable to decode value: [%w]", err)
+				}
+			}
+		}
+	}
+
+	for _, info := range dec.cache.CustomFieldsFastAccess {
+		if err := dec.decodeField(&info.tag, fieldByIndexWithAlloc(root, info.path)); err != nil {
 			return fmt.Errorf("unable to decode value: [%w]", err)
 		}
 	}
@@ -342,13 +464,11 @@ func (dec *Decoder) Decode(v any) error {
 }
 
 // NewDecoder returns new Decoder that reads data from meta.
-func NewDecoder(meta *metav1.ObjectMeta) *Decoder {
-	return &Decoder{
-		in: meta,
-	}
+func NewDecoder() *Decoder {
+	return &Decoder{}
 }
 
 // Unmarshal reads data from K8s object metadata using default Decoder.
 func Unmarshal(meta *metav1.ObjectMeta, v any) error {
-	return NewDecoder(meta).Decode(v)
+	return NewDecoder().Decode(meta, v)
 }

@@ -55,6 +55,9 @@ limitations under the License.
 //   - pointers - pointers will be dereferenced during serialization/deserialization.
 //   - struct - structs can be only used with 'inline' tag option.
 //
+// Limitations:
+//   - current implemntation does not support reference cycles inside decoded and encoded structs. The result of such operations is undefined.
+//
 // [annotation]: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/#syntax-and-character-set
 // [label]: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#syntax-and-character-set
 package metaser
