@@ -823,3 +823,51 @@ var _ = Describe("Decoding embedded structs", func() {
 		Expect(v.C.B.A.X).To(Equal("test"))
 	})
 })
+
+var _ = Describe("Decoding Option struct", func() {
+	type A struct {
+		X Option[*bool] `k8s:"annotation:iks"`
+	}
+	When("annotation exists", func() {
+		It("Should set proper Option values when annotation value is true", func() {
+			v := A{}
+			m := &metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"iks": "true",
+				},
+			}
+			dec := NewDecoder()
+			err := dec.Decode(m, &v)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(v.X.IsSet()).To(BeTrue())
+			Expect(v.X.Get()).ToNot(BeNil())
+			Expect(*v.X.Get()).To(BeTrue())
+		})
+		It("Should set proper Option values when annotation value is false", func() {
+			v := A{}
+			m := &metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"iks": "false",
+				},
+			}
+			dec := NewDecoder()
+			err := dec.Decode(m, &v)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(v.X.IsSet()).To(BeTrue())
+			Expect(v.X.Get()).ToNot(BeNil())
+			Expect(*v.X.Get()).To(BeFalse())
+		})
+	})
+	When("annotation does not exist", func() {
+		It("Should set proper Option values", func() {
+			v := A{}
+			m := &metav1.ObjectMeta{
+				Annotations: map[string]string{},
+			}
+			dec := NewDecoder()
+			err := dec.Decode(m, &v)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(v.X.IsSet()).To(BeFalse())
+		})
+	})
+})

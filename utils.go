@@ -18,6 +18,7 @@ package metaser
 
 import (
 	"reflect"
+	"strings"
 )
 
 func dereference(v reflect.Value) reflect.Value {
@@ -75,4 +76,14 @@ func visit(root reflect.Type, visitor func(reflect.Type, []int) (bool, error)) e
 		}
 	}
 	return nil
+}
+
+func isOption(out reflect.Value) bool {
+	return strings.HasPrefix(out.Type().String(), "metaser.Option")
+}
+
+// asWritableValue constructs new writable reflact.Value from none readable/writable value.
+// if 'v' is not addressable, function will panic.
+func asWritableValue(v reflect.Value) reflect.Value {
+	return reflect.NewAt(v.Type(), v.Addr().UnsafePointer()).Elem()
 }

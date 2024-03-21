@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2023 Samsung Electronics Co., Ltd All Rights Reserved
+Copyright (c) 2023 - 2024 Samsung Electronics Co., Ltd All Rights Reserved
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -297,6 +297,44 @@ var _ = Describe("Encoder", func() {
 			err := Marshal(&s, m)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(m.Annotations).To(HaveKeyWithValue("test", `{"A":[1,3,6]}`))
+		})
+	})
+	Context("In case struct contains Option field", func() {
+		type s struct {
+			MyKey Option[bool] `k8s:"annotation:test,omitempty"`
+		}
+		Context("Option is set to true", func() {
+			It("should be serialized", func() {
+				s := s{
+					MyKey: Some(true),
+				}
+				m := &metav1.ObjectMeta{Annotations: map[string]string{}}
+				err := Marshal(&s, m)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(m.Annotations).To(HaveKeyWithValue("test", "true"))
+			})
+		})
+		Context("Option is set to false", func() {
+			It("should be serialized", func() {
+				s := s{
+					MyKey: Some(false),
+				}
+				m := &metav1.ObjectMeta{Annotations: map[string]string{}}
+				err := Marshal(&s, m)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(m.Annotations).To(HaveKeyWithValue("test", "false"))
+			})
+		})
+		Context("Option is not set", func() {
+			It("should not be serialized", func() {
+				s := s{
+					MyKey: None[bool](),
+				}
+				m := &metav1.ObjectMeta{Annotations: map[string]string{}}
+				err := Marshal(&s, m)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(m.Annotations).ToNot(HaveKey("test"))
+			})
 		})
 	})
 })

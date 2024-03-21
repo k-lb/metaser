@@ -53,7 +53,8 @@ limitations under the License.
 //   - slice - encodes field as comma separated list of elements. Serialized elements cannot contain comma.
 //   - map - encodes field as comma separated list of <key>:<value> pairs. Serialized elements cannot contain comma or semicolon.
 //   - pointers - pointers will be dereferenced during serialization/deserialization.
-//   - struct - structs can be only used with 'inline' tag option.
+//   - struct - structs can be only used with 'inline' tag.
+//   - metaser.Option[T] - generic struct representing optional value.
 //
 // Limitations:
 //   - current implemntation does not support reference cycles inside decoded and encoded structs. The result of such operations is undefined.

@@ -59,7 +59,18 @@ func encodeUndefined(in reflect.Value) (string, error) {
 	if implements[encoding.TextMarshaler](in) {
 		return encodeUsingTextMarshaler(in)
 	}
+	if isOption(in) {
+		return encodeOption(in)
+	}
 	return encodePrimitive(in)
+}
+
+func encodeOption(in reflect.Value) (string, error) {
+	isSome := in.Field(isSetFieldIndex)
+	if isSome.Bool() {
+		return encodeUndefined(in.Field(valueFieldIndex))
+	}
+	return "", nil
 }
 
 func encodeJson(in reflect.Value) (string, error) {

@@ -128,7 +128,6 @@ func assignToMap(out reflect.Value, in string) error {
 		if len(elem) != 2 {
 			return fmt.Errorf("invalid map item syntax, expected <key>:<value>, got: %s", value)
 		}
-		// TODO? How to get existing value preallocated in map instead of creating new one?
 		value := reflect.New(mp.Type().Elem()).Elem()
 		if err := decodeUndefined(value, elem[1]); err != nil {
 			return fmt.Errorf("unable to decode map item (key '%s', value: '%s'): [%w]", elem[0], elem[1], err)
@@ -226,7 +225,18 @@ func decodeUndefined(out reflect.Value, in string) error {
 	if implements[encoding.TextUnmarshaler](out) {
 		return decodeUsingTextUnmarshaler(out, in)
 	}
+	if isOption(out) {
+		return decodeOption(out, in)
+	}
 	return decodePrimitive(out, in)
+}
+
+func decodeOption(out reflect.Value, in string) error {
+	err := decodeUndefined(asWritableValue(out.FieldByName("value")), in)
+	if err == nil {
+		asWritableValue(out.FieldByName("isSet")).SetBool(true)
+	}
+	return err
 }
 
 func decodeJson(out reflect.Value, in string) error {
