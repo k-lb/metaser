@@ -40,7 +40,7 @@ limitations under the License.
 //   - inout - indicate if field should be used during decoding and encoding. This is default value if 'in' or 'out' is not set explicitly.
 //   - out - indicate if field should be used during encoding and ignored during decoding
 //   - inline - can be only used on struct fields. Inline all contained structure fields into outer struct.
-//   - omitempty - do not encode field if have zero value.
+//   - omitempty - do not encode field if have zero value. If the annotation or label exists it will be removed from metadata.
 //   - immutable - the value of field cannot change during decoding.
 //
 // Supported types:

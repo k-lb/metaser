@@ -237,7 +237,13 @@ func (enc *Encoder) encodeField(dv *structField) error {
 		return nil
 	}
 
-	if dv.value.IsZero() && dv.tag.omitempty {
+	if dv.tag.omitempty && dv.value.IsZero() {
+		switch dv.tag.source {
+		case label:
+			delete(enc.out.Labels, dv.tag.value)
+		case annotation:
+			delete(enc.out.Annotations, dv.tag.value)
+		}
 		return nil
 	}
 
@@ -295,6 +301,14 @@ func (enc *Encoder) Encode(v any, meta *metav1.ObjectMeta) error {
 
 	if value.Kind() != reflect.Pointer {
 		return fmt.Errorf("expected pointer to value")
+	}
+
+	if meta.Annotations == nil {
+		meta.Annotations = map[string]string{}
+	}
+
+	if meta.Labels == nil {
+		meta.Labels = map[string]string{}
 	}
 
 	enc.values, err = appendFieldValues(enc.values, value)

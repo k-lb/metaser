@@ -337,4 +337,42 @@ var _ = Describe("Encoder", func() {
 			})
 		})
 	})
+	Context("In case MetaObject contains annotation referencing field with omitempty", func() {
+		It("should not be serialized", func() {
+			type S struct {
+				MyKey bool `k8s:"annotation:test,omitempty"`
+			}
+			s := S{
+				MyKey: false,
+			}
+
+			m := &metav1.ObjectMeta{Annotations: map[string]string{"test": "true"}}
+			err := Marshal(&s, m)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(m.Annotations).ToNot(HaveKey("test"))
+		})
+	})
+	Context("In case MetaObject contains annotation referencig Option field with omitempty", func() {
+		It("should not be serialized", func() {
+			type S struct {
+				MyKey Option[bool] `k8s:"annotation:test,omitempty"`
+			}
+			s := S{
+				MyKey: None[bool](),
+			}
+
+			m := &metav1.ObjectMeta{Annotations: map[string]string{"test": "true"}}
+			err := Marshal(&s, m)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(m.Annotations).ToNot(HaveKey("test"))
+
+			s = S{
+				MyKey: Some(false),
+			}
+			m = &metav1.ObjectMeta{Annotations: map[string]string{"test": "true"}}
+			err = Marshal(&s, m)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(m.Annotations).To(HaveKeyWithValue("test", "false"))
+		})
+	})
 })
