@@ -40,11 +40,6 @@ type Decoder struct {
 	// but instead will traverse fields to gather all possible decoding errors.
 	AccumulateFieldErrors bool
 
-	// ImmutabilityVerification will force metaser to check 'immutable' tags during Decode().
-	// This option can be set true during Webhook's verification routines to check
-	// if immutable field did not change accross oldObject and Object.
-	ImmutabilityVerification bool
-
 	fieldErrors field.ErrorList
 	cache       fastAccessCache
 }
@@ -55,12 +50,13 @@ type fieldInfo struct {
 }
 
 type fastAccessCache struct {
-	CachedType             reflect.Type
-	NameFastAccess         []fieldInfo
-	NamespaceFastAccess    []fieldInfo
-	AnnotationFastAccess   map[string][]fieldInfo
-	LabelsFastAccess       map[string][]fieldInfo
-	CustomFieldsFastAccess []fieldInfo
+	CachedType                reflect.Type
+	NameFastAccess            []fieldInfo
+	NamespaceFastAccess       []fieldInfo
+	AnnotationFastAccess      map[string][]fieldInfo
+	LabelsFastAccess          map[string][]fieldInfo
+	CustomFieldsFastAccess    []fieldInfo
+	ImmutableFieldsFastAccess []fieldInfo
 }
 
 func assignToBool(out reflect.Value, in string) error {
@@ -286,7 +282,6 @@ func (dec *Decoder) equal(v1, v2 reflect.Value) bool {
 }
 
 func (dec *Decoder) decodeField(tag *parsedTag, v reflect.Value) error {
-	var cv reflect.Value
 	var err error
 
 	if tag == nil || tag.dir == out {
@@ -296,11 +291,6 @@ func (dec *Decoder) decodeField(tag *parsedTag, v reflect.Value) error {
 	if tag.inline {
 		// will be handled by other structField
 		return nil
-	}
-
-	if dec.ImmutabilityVerification && tag.immutable {
-		cv = reflect.New(v.Type()).Elem()
-		v, cv = cv, v
 	}
 
 	switch tag.source {
@@ -318,12 +308,6 @@ func (dec *Decoder) decodeField(tag *parsedTag, v reflect.Value) error {
 		}
 	case source(undefined):
 		err = decode(v, "", tag.enc, dec.in)
-	}
-
-	if dec.ImmutabilityVerification && tag.immutable {
-		if !dec.equal(v, cv) {
-			err = errors.Join(err, fmt.Errorf("field is immutable"))
-		}
 	}
 
 	if err != nil && dec.AccumulateFieldErrors {
@@ -384,6 +368,9 @@ func (dec *Decoder) buildCache(root reflect.Value) error {
 				if pt.enc == custom {
 					dec.cache.CustomFieldsFastAccess = append(dec.cache.CustomFieldsFastAccess, item)
 				}
+			}
+			if pt.immutable {
+				dec.cache.ImmutableFieldsFastAccess = append(dec.cache.ImmutableFieldsFastAccess, item)
 			}
 			recurse = recurse || pt.inline
 		}
@@ -472,6 +459,52 @@ func (dec *Decoder) Decode(meta *metav1.ObjectMeta, v any) error {
 
 	if len(dec.fieldErrors) > 0 {
 		return &decodeError{message: "unable to decode value", fieldErrors: dec.fieldErrors}
+	}
+
+	return nil
+}
+
+// Validates validates if ObjectMeta contains data that may break invariants
+// specified in metaser tags defined on v.
+func (dec *Decoder) Validate(meta *metav1.ObjectMeta, v any) error {
+	dec.in = meta
+	dec.fieldErrors = field.ErrorList{}
+	var err error
+
+	root := reflect.ValueOf(v)
+
+	if root.Kind() != reflect.Pointer {
+		return fmt.Errorf("expected pointer to value")
+	}
+
+	if err = dec.buildCache(root); err != nil {
+		return err
+	}
+
+	root = dereference(root)
+
+	for _, info := range dec.cache.ImmutableFieldsFastAccess {
+		t := root.Type().FieldByIndex(info.path)
+		v := fieldByIndexWithAlloc(root, info.path)
+		cv := reflect.New(t.Type).Elem()
+		if err = dec.decodeField(&info.tag, cv); err != nil {
+			return fmt.Errorf("unable to decode value: [%w]", err)
+		}
+		if !dec.equal(v, cv) {
+			err = errors.Join(err, fmt.Errorf("field is immutable"))
+		}
+		if err != nil && dec.AccumulateFieldErrors {
+			dec.fieldErrors = append(dec.fieldErrors, field.TypeInvalid(field.NewPath("metadata").Child(info.tag.source.String()),
+				info.tag.value, err.Error()))
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("%s '%s': [%w]", info.tag.source, info.tag.value, err)
+		}
+	}
+
+	if len(dec.fieldErrors) > 0 {
+		return &decodeError{message: "validation failed", fieldErrors: dec.fieldErrors}
 	}
 
 	return nil

@@ -700,8 +700,7 @@ var _ = Describe("Decoder with ImmutabilityVerification enabled", func() {
 				},
 			}
 			dec := NewDecoder()
-			dec.ImmutabilityVerification = true
-			err := dec.Decode(m, &s)
+			err := dec.Validate(m, &s)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(s.MyKey).To(Equal(1))
 			Expect(s.MyKey2).To(Equal(float32(2.0)))
@@ -730,8 +729,7 @@ var _ = Describe("Decoder with ImmutabilityVerification enabled", func() {
 			}
 			dec := NewDecoder()
 			dec.AccumulateFieldErrors = true
-			dec.ImmutabilityVerification = true
-			err := dec.Decode(m, &s)
+			err := dec.Validate(m, &s)
 			Expect(err).To(HaveOccurred())
 			Expect(s.MyKey).To(Equal(2))
 			Expect(s.MyKey2).To(Equal(float32(3.0)))
