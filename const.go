@@ -47,7 +47,6 @@ const (
 	namespace
 	annotation
 	label
-	custom
 )
 
 const (
@@ -56,7 +55,10 @@ const (
 	inout
 )
 
-const jsonEnc encoder = iota + 1
+const (
+	jsonEnc encoder = iota + 1
+	custom
+)
 
 func (s source) String() string {
 	switch s {
@@ -68,8 +70,6 @@ func (s source) String() string {
 		return annotationKey
 	case label:
 		return labelKey
-	case custom:
-		return customKey
 	}
 	return ""
 }

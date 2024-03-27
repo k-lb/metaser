@@ -197,12 +197,14 @@ func encodePrimitive(in reflect.Value) (out string, err error) {
 	return out, err
 }
 
-func encode(in reflect.Value, enc encoder) (string, error) {
+func encode(in reflect.Value, enc encoder, meta *metav1.ObjectMeta) (string, error) {
 	switch enc {
 	case encoder(undefined):
 		return encodeUndefined(in)
 	case jsonEnc:
 		return encodeJson(in)
+	case custom:
+		return "", encodeCustom(in, meta)
 	default:
 		return "", fmt.Errorf("unsupported encoding")
 	}
@@ -233,7 +235,9 @@ func (enc *Encoder) encodeField(dv *structField) error {
 	var val string
 	var err error
 
-	if dv.tag == nil || dv.tag.dir == in {
+	// do not encoded fields that are marked as 'input only' or 'inline'.
+	// fields within inline field will be encoded by separate calls to encodeField.
+	if dv.tag == nil || dv.tag.dir == in || dv.tag.inline {
 		return nil
 	}
 
@@ -257,15 +261,15 @@ func (enc *Encoder) encodeField(dv *structField) error {
 			enc.out.Namespace = val
 		}
 	case label:
-		if val, err = encode(dv.value, dv.tag.enc); err == nil {
+		if val, err = encode(dv.value, dv.tag.enc, enc.out); err == nil {
 			enc.out.Labels[dv.tag.value] = val
 		}
 	case annotation:
-		if val, err = encode(dv.value, dv.tag.enc); err == nil {
+		if val, err = encode(dv.value, dv.tag.enc, enc.out); err == nil {
 			enc.out.Annotations[dv.tag.value] = val
 		}
-	case custom:
-		err = encodeCustom(dv.value, enc.out)
+	case source(undefined):
+		_, err = encode(dv.value, dv.tag.enc, enc.out)
 	}
 
 	return err

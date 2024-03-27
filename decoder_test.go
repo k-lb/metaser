@@ -635,7 +635,7 @@ var _ = Describe("Decoder", func() {
 	Context("In case struct tags contains custom field", func() {
 		It("should return be deserialized with CustomUnmarshaler ", func() {
 			s := struct {
-				MyKey MyStruct4 `k8s:"custom"`
+				MyKey MyStruct4 `k8s:"enc:custom"`
 			}{}
 			m := &metav1.ObjectMeta{
 				Annotations: map[string]string{

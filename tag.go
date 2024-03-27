@@ -37,6 +37,8 @@ func parseEncoding(expr string) (encoder, error) {
 	switch expr {
 	case jsonKey:
 		return encoder(jsonEnc), nil
+	case customKey:
+		return encoder(custom), nil
 	case "":
 		return encoder(undefined), nil
 	default:
@@ -85,8 +87,6 @@ func parseTag(tag reflect.StructTag) (pt *parsedTag, err error) {
 			pt.dir = inout
 		case omitEmptyKey:
 			pt.omitempty = true
-		case customKey:
-			pt.source = custom
 		case immutableKey:
 			pt.immutable = true
 		default:

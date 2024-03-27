@@ -269,12 +269,14 @@ func decodeCustom(out reflect.Value, meta *metav1.ObjectMeta) error {
 	return nil
 }
 
-func decode(out reflect.Value, in string, enc encoder) error {
+func decode(out reflect.Value, in string, enc encoder, meta *metav1.ObjectMeta) error {
 	switch enc {
 	case encoder(undefined):
 		return decodeUndefined(out, in)
 	case jsonEnc:
 		return decodeJson(out, in)
+	case custom:
+		return decodeCustom(out, meta)
 	}
 	return nil
 }
@@ -308,14 +310,14 @@ func (dec *Decoder) decodeField(tag *parsedTag, v reflect.Value) error {
 		err = decodePrimitive(v, dec.in.Namespace)
 	case label:
 		if val, ok := dec.in.Labels[tag.value]; ok {
-			err = decode(v, val, tag.enc)
+			err = decode(v, val, tag.enc, dec.in)
 		}
 	case annotation:
 		if val, ok := dec.in.Annotations[tag.value]; ok {
-			err = decode(v, val, tag.enc)
+			err = decode(v, val, tag.enc, dec.in)
 		}
-	case custom:
-		err = decodeCustom(v, dec.in)
+	case source(undefined):
+		err = decode(v, "", tag.enc, dec.in)
 	}
 
 	if dec.ImmutabilityVerification && tag.immutable {
@@ -378,8 +380,10 @@ func (dec *Decoder) buildCache(root reflect.Value) error {
 				v := dec.cache.LabelsFastAccess[pt.value]
 				v = append(v, item)
 				dec.cache.LabelsFastAccess[pt.value] = v
-			case custom:
-				dec.cache.CustomFieldsFastAccess = append(dec.cache.CustomFieldsFastAccess, item)
+			case source(undefined):
+				if pt.enc == custom {
+					dec.cache.CustomFieldsFastAccess = append(dec.cache.CustomFieldsFastAccess, item)
+				}
 			}
 			recurse = recurse || pt.inline
 		}

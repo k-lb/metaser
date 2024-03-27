@@ -255,7 +255,7 @@ var _ = Describe("Encoder", func() {
 	Context("In case struct tags contains custom field", func() {
 		It("should return be serialized with MetadataMarshaler ", func() {
 			s := struct {
-				MyKey MyStruct5 `k8s:"custom"`
+				MyKey MyStruct5 `k8s:"enc:custom"`
 			}{
 				MyKey: MyStruct5{
 					A: []int{1, 3, 6},

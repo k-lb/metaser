@@ -34,8 +34,7 @@ limitations under the License.
 //   - label - indicate if field should be serialized/deserialized from k8s Labels map. The annotation should follow "label:<key>" syntax, where <key> should be valid k8s [label]
 //   - name - indicate if field should be serialized/deserialized from k8s Name value.
 //   - namespace - indicate if field should be serialized/deserialized from k8s Namespace field value.
-//   - custom - indicate if field should be serialized/deserialized using MetadataUnmarshaler/MetadataMarshaler
-//   - enc - sets custom encoding/decoding scheme for field. Supported values: "json". Annotations should follow enc:<val> syntax, where val is one of [json]
+//   - enc - sets encoding/decoding scheme for field. If ommited default schema will be used (see Supported types section for more info). If type is not in supported type list the TextMarshaler/TextUnmarshaler will be used. Tag should follow enc:<val> syntax, where val is one of supported values defined in Encoding schemes section.
 //   - in - indicate if field should be used during decoding and ignored during encoding
 //   - inout - indicate if field should be used during decoding and encoding. This is default value if 'in' or 'out' is not set explicitly.
 //   - out - indicate if field should be used during encoding and ignored during decoding
@@ -43,11 +42,15 @@ limitations under the License.
 //   - omitempty - do not encode field if have zero value. If the annotation or label exists it will be removed from metadata.
 //   - immutable - the value of field cannot change during decoding.
 //
+// Encoding schemes:
+//   - json - field will deserialized/serialized with json decoder/encoder
+//   - custom - field will be deserialized/serialized with metaser.MetadataUnmarshaler/metaser.MetadataMarshaler interface.
+//
 // Supported types:
-//   - bool
-//   - int, int8, int16, int32, int64
-//   - uint, uint8, uint16, uint32, uint64
-//   - float32, float64
+//   - bool - serialized/deserialized using strconv package.
+//   - int, int8, int16, int32, int64 - serialized/deserialized using strconv package.
+//   - uint, uint8, uint16, uint32, uint64 - serialized/deserialized using strconv package.
+//   - float32, float64  - serialized/deserialized using strconv package.
 //   - string
 //   - array - encodes field as comma separated list of elements. Serialized elements cannot contain comma.
 //   - slice - encodes field as comma separated list of elements. Serialized elements cannot contain comma.
