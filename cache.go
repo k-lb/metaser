@@ -26,13 +26,12 @@ type fieldInfo struct {
 }
 
 type cache struct {
-	CachedType                reflect.Type
-	NameFastAccess            []fieldInfo
-	NamespaceFastAccess       []fieldInfo
-	AnnotationFastAccess      map[string][]fieldInfo
-	LabelsFastAccess          map[string][]fieldInfo
-	CustomFieldsFastAccess    []fieldInfo
-	ImmutableFieldsFastAccess []fieldInfo
+	CachedType             reflect.Type
+	NameFastAccess         []fieldInfo
+	NamespaceFastAccess    []fieldInfo
+	AnnotationFastAccess   map[string][]fieldInfo
+	LabelsFastAccess       map[string][]fieldInfo
+	CustomFieldsFastAccess []fieldInfo
 }
 
 func (c *cache) build(root reflect.Value) error {
@@ -81,9 +80,6 @@ func (c *cache) build(root reflect.Value) error {
 				if pt.enc == custom {
 					c.CustomFieldsFastAccess = append(c.CustomFieldsFastAccess, item)
 				}
-			}
-			if pt.immutable {
-				c.ImmutableFieldsFastAccess = append(c.ImmutableFieldsFastAccess, item)
 			}
 			recurse = recurse || pt.inline
 		}

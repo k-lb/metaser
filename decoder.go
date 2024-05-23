@@ -30,17 +30,30 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
-// Decoder reads and decodes data from Kubernets Object's metatdata
+// Decoder reads and decodes data from Kubernets Resource metatdata
 type Decoder struct {
-	in *metav1.ObjectMeta
+	meta        *metav1.ObjectMeta
+	fieldErrors field.ErrorList
+	cache       cache
+	root        reflect.Value
 
+	performValidation     bool
 	accumulateFieldErrors bool
-	fieldErrors           field.ErrorList
-	cache                 cache
+	skipDefaultWorkload   bool
+	filter                fieldFilter
 }
 
 // DecodeOption to be passed to Decode()
 type DecodeOption func(dec *Decoder)
+
+type fieldFilter func(field *fieldInfo) bool
+
+func (f fieldFilter) Apply(info *fieldInfo) bool {
+	if f != nil {
+		return f(info)
+	}
+	return true
+}
 
 // AccumulateFieldErrors enforces decoder to accumulate
 // all encountered decode errors instead of aborting on first found one.
@@ -48,6 +61,13 @@ type DecodeOption func(dec *Decoder)
 func AccumulateFieldErrors() DecodeOption {
 	return func(dec *Decoder) {
 		dec.accumulateFieldErrors = true
+	}
+}
+
+// Validate performs validation step in Decode()
+func Validate(enabled bool) DecodeOption {
+	return func(dec *Decoder) {
+		dec.performValidation = enabled
 	}
 }
 
@@ -257,23 +277,17 @@ func decodeCustom(out reflect.Value, meta *metav1.ObjectMeta) error {
 	return nil
 }
 
-func decode(out reflect.Value, in string, enc encoder, meta *metav1.ObjectMeta) error {
+func decode(out reflect.Value, in string, enc encoder) error {
 	switch enc {
 	case encoder(undefined):
 		return decodeUndefined(out, in)
 	case jsonEnc:
 		return decodeJson(out, in)
-	case custom:
-		return decodeCustom(out, meta)
 	}
 	return nil
 }
 
-func (dec *Decoder) equal(v1, v2 reflect.Value) bool {
-	return reflect.DeepEqual(v1.Interface(), v2.Interface())
-}
-
-func (dec *Decoder) decodeField(tag *parsedTag, v reflect.Value) error {
+func (dec *Decoder) decodeField(meta *metav1.ObjectMeta, tag *parsedTag, v reflect.Value) error {
 	var err error
 
 	if tag == nil || tag.dir == out {
@@ -287,25 +301,20 @@ func (dec *Decoder) decodeField(tag *parsedTag, v reflect.Value) error {
 
 	switch tag.source {
 	case name:
-		err = decodePrimitive(v, dec.in.Name)
+		err = decodePrimitive(v, meta.Name)
 	case namespace:
-		err = decodePrimitive(v, dec.in.Namespace)
+		err = decodePrimitive(v, meta.Namespace)
 	case label:
-		if val, ok := dec.in.Labels[tag.value]; ok {
-			err = decode(v, val, tag.enc, dec.in)
-		}
+		err = decode(v, meta.Labels[tag.value], tag.enc)
 	case annotation:
-		if val, ok := dec.in.Annotations[tag.value]; ok {
-			err = decode(v, val, tag.enc, dec.in)
-		}
+		err = decode(v, meta.Annotations[tag.value], tag.enc)
 	case source(undefined):
-		err = decode(v, "", tag.enc, dec.in)
+		err = decodeCustom(v, meta)
 	}
 
-	if err != nil && dec.accumulateFieldErrors {
+	if dec.accumulateFieldErrors && err != nil {
 		dec.fieldErrors = append(dec.fieldErrors, field.TypeInvalid(field.NewPath("metadata").Child(tag.source.String()),
 			tag.value, err.Error()))
-		return nil
 	}
 
 	if err != nil {
@@ -333,123 +342,134 @@ func fieldByIndexWithAlloc(v reflect.Value, index []int) reflect.Value {
 	return v
 }
 
+func (dec *Decoder) decode() error {
+	return dec.iterate(func(info *fieldInfo) error {
+		if !dec.filter.Apply(info) {
+			return nil
+		}
+		if err := dec.decodeField(dec.meta, &info.tag, fieldByIndexWithAlloc(dec.root, info.path)); err != nil && !dec.accumulateFieldErrors {
+			return err
+		}
+		return nil
+	})
+}
+
+func (dec *Decoder) validate() error {
+	return dec.iterate(func(info *fieldInfo) error {
+		if !dec.filter.Apply(info) {
+			return nil
+		}
+		if err := dec.validateField(dec.meta, &info.tag, fieldByIndexWithAlloc(dec.root, info.path)); err != nil && !dec.accumulateFieldErrors {
+			return err
+		}
+		return nil
+	})
+}
+
+func (dec *Decoder) iterate(fn func(info *fieldInfo) error) error {
+	for _, info := range dec.cache.NameFastAccess {
+		if err := fn(&info); err != nil {
+			return err
+		}
+	}
+	for _, info := range dec.cache.NamespaceFastAccess {
+		if err := fn(&info); err != nil {
+			return err
+		}
+	}
+	for k := range dec.meta.Annotations {
+		for _, info := range dec.cache.AnnotationFastAccess[k] {
+			if err := fn(&info); err != nil {
+				return err
+			}
+		}
+	}
+	for k := range dec.meta.Labels {
+		for _, info := range dec.cache.LabelsFastAccess[k] {
+			if err := fn(&info); err != nil {
+				return err
+			}
+		}
+	}
+	for _, info := range dec.cache.CustomFieldsFastAccess {
+		if err := fn(&info); err != nil {
+			return err
+		}
+	}
+	if len(dec.fieldErrors) > 0 {
+		return &decodeError{message: "multiple fields errors encountered", fieldErrors: dec.fieldErrors}
+	}
+	return nil
+}
+
 // Decode reads data from K8s object metadata and stores them in v.
 //
 // See package documentation for details about deserialization.
 func (dec *Decoder) Decode(meta *metav1.ObjectMeta, v any, options ...DecodeOption) error {
-	dec.in = meta
+	// default values
 	dec.fieldErrors = field.ErrorList{}
+	dec.performValidation = false
 	dec.accumulateFieldErrors = false
+	dec.skipDefaultWorkload = false
+	dec.meta = meta
+	dec.filter = nil
 
 	root := reflect.ValueOf(v)
 
 	if root.Kind() != reflect.Pointer {
-		return fmt.Errorf("expected pointer to value")
+		return fmt.Errorf("required pointer to value")
 	}
 
 	if err := dec.cache.build(root); err != nil {
 		return err
 	}
 
-	root = dereference(root)
+	dec.root = dereference(root)
 
 	for _, opt := range options {
 		opt(dec)
 	}
 
-	for _, info := range dec.cache.NameFastAccess {
-		if err := dec.decodeField(&info.tag, fieldByIndexWithAlloc(root, info.path)); err != nil {
-			return fmt.Errorf("unable to decode value: [%w]", err)
+	if dec.performValidation {
+		if err := dec.validate(); err != nil {
+			return fmt.Errorf("failed to validate fields: %w", err)
 		}
 	}
 
-	for _, info := range dec.cache.NamespaceFastAccess {
-		if err := dec.decodeField(&info.tag, fieldByIndexWithAlloc(root, info.path)); err != nil {
-			return fmt.Errorf("unable to decode value: [%w]", err)
+	if !dec.skipDefaultWorkload {
+		if err := dec.decode(); err != nil {
+			return fmt.Errorf("failed to decode fields: %w", err)
 		}
-	}
-
-	for key := range dec.in.Annotations {
-		if list, ok := dec.cache.AnnotationFastAccess[key]; ok {
-			for _, info := range list {
-				if err := dec.decodeField(&info.tag, fieldByIndexWithAlloc(root, info.path)); err != nil {
-					return fmt.Errorf("unable to decode value: [%w]", err)
-				}
-			}
-		}
-	}
-
-	for key := range dec.in.Labels {
-		if list, ok := dec.cache.LabelsFastAccess[key]; ok {
-			for _, info := range list {
-				if err := dec.decodeField(&info.tag, fieldByIndexWithAlloc(root, info.path)); err != nil {
-					return fmt.Errorf("unable to decode value: [%w]", err)
-				}
-			}
-		}
-	}
-
-	for _, info := range dec.cache.CustomFieldsFastAccess {
-		if err := dec.decodeField(&info.tag, fieldByIndexWithAlloc(root, info.path)); err != nil {
-			return fmt.Errorf("unable to decode value: [%w]", err)
-		}
-	}
-
-	if len(dec.fieldErrors) > 0 {
-		return &decodeError{message: "unable to decode value", fieldErrors: dec.fieldErrors}
 	}
 
 	return nil
 }
 
-// Validates validates if ObjectMeta contains data that may break invariants
-// specified in metaser tags defined on v.
-func (dec *Decoder) Validate(meta *metav1.ObjectMeta, v any, options ...DecodeOption) error {
-	dec.in = meta
-	dec.fieldErrors = field.ErrorList{}
+func (dec *Decoder) validateField(meta *metav1.ObjectMeta, tag *parsedTag, v reflect.Value) error {
 	var err error
 
-	root := reflect.ValueOf(v)
-
-	if root.Kind() != reflect.Pointer {
-		return fmt.Errorf("expected pointer to value")
-	}
-
-	if err = dec.cache.build(root); err != nil {
-		return err
-	}
-
-	root = dereference(root)
-
-	for _, opt := range options {
-		opt(dec)
-	}
-
-	for _, info := range dec.cache.ImmutableFieldsFastAccess {
-		t := root.Type().FieldByIndex(info.path)
-		v := fieldByIndexWithAlloc(root, info.path)
-		cv := reflect.New(t.Type).Elem()
-		if err = dec.decodeField(&info.tag, cv); err != nil {
+	// perform equality check
+	if tag.immutable {
+		cv := reflect.New(v.Type()).Elem()
+		if err = dec.decodeField(meta, tag, cv); err != nil {
 			return fmt.Errorf("unable to decode value: [%w]", err)
 		}
 		if !dec.equal(v, cv) {
 			err = errors.Join(err, fmt.Errorf("field is immutable"))
 		}
-		if err != nil && dec.accumulateFieldErrors {
-			dec.fieldErrors = append(dec.fieldErrors, field.TypeInvalid(field.NewPath("metadata").Child(info.tag.source.String()),
-				info.tag.value, err.Error()))
-			continue
+		if dec.accumulateFieldErrors && err != nil {
+			dec.fieldErrors = append(dec.fieldErrors, field.TypeInvalid(field.NewPath("metadata").Child(tag.source.String()),
+				tag.value, err.Error()))
 		}
 		if err != nil {
-			return fmt.Errorf("%s '%s': [%w]", info.tag.source, info.tag.value, err)
+			return fmt.Errorf("source: %s, key: '%s': [%w]", tag.source, tag.value, err)
 		}
 	}
-
-	if len(dec.fieldErrors) > 0 {
-		return &decodeError{message: "validation failed", fieldErrors: dec.fieldErrors}
-	}
-
 	return nil
+}
+
+func (val *Decoder) equal(v1, v2 reflect.Value) bool {
+	return reflect.DeepEqual(v1.Interface(), v2.Interface())
 }
 
 // NewDecoder returns new Decoder that reads data from meta.

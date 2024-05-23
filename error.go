@@ -1,6 +1,10 @@
 package metaser
 
-import "k8s.io/apimachinery/pkg/util/validation/field"
+import (
+	"errors"
+
+	"k8s.io/apimachinery/pkg/util/validation/field"
+)
 
 type decodeError struct {
 	message     string
@@ -12,7 +16,8 @@ func (de *decodeError) Error() string {
 }
 
 func GetErrorList(err error) field.ErrorList {
-	if de, ok := err.(*decodeError); ok {
+	de := &decodeError{}
+	if errors.As(err, &de) {
 		return de.fieldErrors
 	}
 	return nil

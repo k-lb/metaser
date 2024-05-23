@@ -676,7 +676,7 @@ var _ = Describe("Decoder with GenerateFieldsErrors enabled", func() {
 	})
 })
 
-var _ = Describe("Decoder with ImmutabilityVerification enabled", func() {
+var _ = Describe("immutablity checks", func() {
 	Context("In case struct tags contains field with immutable annotation reference", func() {
 		It("should return no error when struct values are equal to values from annotation", func() {
 			s := struct {
@@ -699,7 +699,7 @@ var _ = Describe("Decoder with ImmutabilityVerification enabled", func() {
 				},
 			}
 			dec := NewDecoder()
-			err := dec.Validate(m, &s)
+			err := dec.Decode(m, &s, Validate(true))
 			Expect(err).ToNot(HaveOccurred())
 			Expect(s.MyKey).To(Equal(1))
 			Expect(s.MyKey2).To(Equal(float32(2.0)))
@@ -727,7 +727,7 @@ var _ = Describe("Decoder with ImmutabilityVerification enabled", func() {
 				},
 			}
 			dec := NewDecoder()
-			err := dec.Validate(m, &s, AccumulateFieldErrors())
+			err := dec.Decode(m, &s, Validate(true), AccumulateFieldErrors())
 			Expect(err).To(HaveOccurred())
 			Expect(s.MyKey).To(Equal(2))
 			Expect(s.MyKey2).To(Equal(float32(3.0)))
@@ -738,10 +738,7 @@ var _ = Describe("Decoder with ImmutabilityVerification enabled", func() {
 			Expect(err.Error()).ToNot(BeEmpty())
 		})
 	})
-})
-
-var _ = Describe("Decoder with ImmutabilityVerification disabled", func() {
-	It("should return no errors when struct values are not equal to values from annotation", func() {
+	It("should return no errors when struct values are not equal to values from annotation and validate is disabled by default", func() {
 		s := struct {
 			MyKey  int     `k8s:"annotation:one,immutable"`
 			MyKey2 float32 `k8s:"annotation:two,immutable"`
