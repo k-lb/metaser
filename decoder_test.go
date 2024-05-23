@@ -766,6 +766,38 @@ var _ = Describe("immutablity checks", func() {
 		Expect(s.MyKey3).To(Equal(true))
 		Expect(s.MyKey4).To(Equal("hello"))
 	})
+	It("should decode only immutable fields when DecodeImmutablesOnly is enabled", func() {
+		s := struct {
+			MyKey  int     `k8s:"annotation:one,immutable"`
+			MyKey2 float32 `k8s:"annotation:two,immutable"`
+			MyKey3 bool    `k8s:"annotation:three,immutable"`
+			MyKey4 string  `k8s:"annotation:four,immutable"`
+			MyKey5 string  `k8s:"annotation:five"`
+		}{
+			MyKey:  2,
+			MyKey2: 3.0,
+			MyKey3: false,
+			MyKey4: "hello2",
+			MyKey5: "test",
+		}
+		m := &metav1.ObjectMeta{
+			Annotations: map[string]string{
+				"one":   "1",
+				"two":   "2.0",
+				"three": "true",
+				"four":  "hello",
+				"five":  "hello",
+			},
+		}
+		dec := NewDecoder()
+		err := dec.Decode(m, &s, DecodeImmutablesOnly(), AccumulateFieldErrors())
+		Expect(err).ToNot(HaveOccurred())
+		Expect(s.MyKey).To(Equal(1))
+		Expect(s.MyKey2).To(Equal(float32(2.0)))
+		Expect(s.MyKey3).To(Equal(true))
+		Expect(s.MyKey4).To(Equal("hello"))
+		Expect(s.MyKey5).To(Equal("test"))
+	})
 })
 
 var _ = Describe("Decoding embedded structs", func() {

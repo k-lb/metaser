@@ -71,6 +71,15 @@ func Validate(enabled bool) DecodeOption {
 	}
 }
 
+// DecodeImmutablesOnly option enforces Decoder to decode only annotations, labels and custom-encoded fields
+// marked as immutable.
+func DecodeImmutablesOnly() DecodeOption {
+	return func(dec *Decoder) {
+		dec.skipDefaultWorkload = false
+		dec.filter = func(fi *fieldInfo) bool { return fi.tag.immutable }
+	}
+}
+
 func assignToBool(out reflect.Value, in string) error {
 	v, err := strconv.ParseBool(in)
 	if err == nil {
