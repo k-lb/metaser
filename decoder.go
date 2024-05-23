@@ -41,22 +41,7 @@ type Decoder struct {
 	AccumulateFieldErrors bool
 
 	fieldErrors field.ErrorList
-	cache       fastAccessCache
-}
-
-type fieldInfo struct {
-	path []int
-	tag  parsedTag
-}
-
-type fastAccessCache struct {
-	CachedType                reflect.Type
-	NameFastAccess            []fieldInfo
-	NamespaceFastAccess       []fieldInfo
-	AnnotationFastAccess      map[string][]fieldInfo
-	LabelsFastAccess          map[string][]fieldInfo
-	CustomFieldsFastAccess    []fieldInfo
-	ImmutableFieldsFastAccess []fieldInfo
+	cache       cache
 }
 
 func assignToBool(out reflect.Value, in string) error {
@@ -323,65 +308,6 @@ func (dec *Decoder) decodeField(tag *parsedTag, v reflect.Value) error {
 	return nil
 }
 
-func (dec *Decoder) buildCache(root reflect.Value) error {
-	if dec.cache.CachedType == root.Type() {
-		return nil
-	}
-
-	dec.cache = fastAccessCache{
-		AnnotationFastAccess: map[string][]fieldInfo{},
-		LabelsFastAccess:     map[string][]fieldInfo{},
-	}
-
-	err := visit(root.Type(), func(t reflect.Type, path []int) (bool, error) {
-		if t.Kind() == reflect.Pointer {
-			return true, nil
-		}
-		if t.Kind() != reflect.Struct {
-			return false, nil
-		}
-		recurse := false
-		for i := 0; i < t.NumField(); i++ {
-			pt, err := parseTag(t.Field(i).Tag)
-			if err != nil {
-				return false, err
-			}
-			if pt == nil {
-				continue
-			}
-			recurse = true
-			item := fieldInfo{append(path, i), *pt}
-			switch pt.source {
-			case name:
-				dec.cache.NameFastAccess = append(dec.cache.NameFastAccess, item)
-			case namespace:
-				dec.cache.NamespaceFastAccess = append(dec.cache.NamespaceFastAccess, item)
-			case annotation:
-				v := dec.cache.AnnotationFastAccess[pt.value]
-				v = append(v, item)
-				dec.cache.AnnotationFastAccess[pt.value] = v
-			case label:
-				v := dec.cache.LabelsFastAccess[pt.value]
-				v = append(v, item)
-				dec.cache.LabelsFastAccess[pt.value] = v
-			case source(undefined):
-				if pt.enc == custom {
-					dec.cache.CustomFieldsFastAccess = append(dec.cache.CustomFieldsFastAccess, item)
-				}
-			}
-			if pt.immutable {
-				dec.cache.ImmutableFieldsFastAccess = append(dec.cache.ImmutableFieldsFastAccess, item)
-			}
-			recurse = recurse || pt.inline
-		}
-		return recurse, nil
-	})
-	if err == nil {
-		dec.cache.CachedType = root.Type()
-	}
-	return err
-}
-
 func fieldByIndexWithAlloc(v reflect.Value, index []int) reflect.Value {
 	if len(index) == 1 {
 		return v.Field(index[0])
@@ -413,7 +339,7 @@ func (dec *Decoder) Decode(meta *metav1.ObjectMeta, v any) error {
 		return fmt.Errorf("expected pointer to value")
 	}
 
-	if err := dec.buildCache(root); err != nil {
+	if err := dec.cache.build(root); err != nil {
 		return err
 	}
 
@@ -477,7 +403,7 @@ func (dec *Decoder) Validate(meta *metav1.ObjectMeta, v any) error {
 		return fmt.Errorf("expected pointer to value")
 	}
 
-	if err = dec.buildCache(root); err != nil {
+	if err = dec.cache.build(root); err != nil {
 		return err
 	}
 
