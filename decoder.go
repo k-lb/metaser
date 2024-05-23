@@ -428,12 +428,7 @@ func (dec *Decoder) iterate(fn func(info *fieldInfo) error) error {
 // See package documentation for details about deserialization.
 func (dec *Decoder) Decode(meta metav1.Object, v any, options ...DecodeOption) error {
 	// default values
-	dec.fieldErrors = field.ErrorList{}
-	dec.performValidation = false
-	dec.accumulateFieldErrors = false
-	dec.skipDefaultWorkload = false
 	dec.meta = meta
-	dec.filter = nil
 
 	// clean-up meta reference to avoid leak.
 	defer func() { *dec = Decoder{} }()

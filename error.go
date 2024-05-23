@@ -15,6 +15,7 @@ func (de *decodeError) Error() string {
 	return de.message
 }
 
+// GetErrorList gets field.ErrorList type from underlying error.
 func GetErrorList(err error) field.ErrorList {
 	de := &decodeError{}
 	if errors.As(err, &de) {

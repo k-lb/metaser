@@ -73,5 +73,5 @@ func (s source) String() string {
 	case label:
 		return labelKey
 	}
-	return ""
+	return "undefined source"
 }
