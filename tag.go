@@ -31,6 +31,7 @@ type parsedTag struct {
 	inline    bool
 	omitempty bool
 	immutable bool
+	aliases   []string
 }
 
 func parseEncoding(expr string) (encoder, error) {
@@ -106,6 +107,8 @@ func parseTag(tag reflect.StructTag) (pt *parsedTag, err error) {
 			case labelKey:
 				pt.source = label
 				pt.value = keyvals[1]
+			case aliasesKey:
+				pt.aliases = strings.Split(keyvals[1], ";")
 			default:
 				return nil, fmt.Errorf("invalid tag syntax. Expected <option>:<value>, unknown option: '%s'", keyvals[0])
 			}

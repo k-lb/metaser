@@ -895,3 +895,26 @@ var _ = Describe("Decoding Option struct", func() {
 		})
 	})
 })
+
+var _ = Describe("Aliases tests", func() {
+	type A struct {
+		X *bool `k8s:"annotation:iks,aliases:myiks;alpha.mydomain.io/someiks"`
+	}
+	When("annotation matching exact annotation key does not exist", func() {
+		It("Should match one of aliases when exist", func() {
+			dec := NewDecoder()
+
+			v := A{}
+			m := &metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"alpha.mydomain.io/someiks": "true",
+				},
+			}
+
+			err := dec.Decode(m, &v)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(v.X).ToNot(BeNil())
+			Expect(*v.X).To(BeTrue())
+		})
+	})
+})

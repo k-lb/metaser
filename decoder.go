@@ -296,6 +296,18 @@ func decode(out reflect.Value, in string, enc encoder) error {
 	return nil
 }
 
+func match(values map[string]string, tag *parsedTag) string {
+	if v, ok := values[tag.value]; ok {
+		return v
+	}
+	for _, alias := range tag.aliases {
+		if v, ok := values[alias]; ok {
+			return v
+		}
+	}
+	return ""
+}
+
 func (dec *Decoder) decodeField(meta *metav1.ObjectMeta, tag *parsedTag, v reflect.Value) error {
 	var err error
 
@@ -314,9 +326,9 @@ func (dec *Decoder) decodeField(meta *metav1.ObjectMeta, tag *parsedTag, v refle
 	case namespace:
 		err = decodePrimitive(v, meta.Namespace)
 	case label:
-		err = decode(v, meta.Labels[tag.value], tag.enc)
+		err = decode(v, match(meta.Labels, tag), tag.enc)
 	case annotation:
-		err = decode(v, meta.Annotations[tag.value], tag.enc)
+		err = decode(v, match(meta.Annotations, tag), tag.enc)
 	case source(undefined):
 		err = decodeCustom(v, meta)
 	}

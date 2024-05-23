@@ -41,6 +41,7 @@ limitations under the License.
 //   - inline - can be only used on struct fields. Inline all contained structure fields into outer struct.
 //   - omitempty - do not encode field if have zero value. If the annotation or label exists it will be removed from metadata.
 //   - immutable - the value of field cannot change during decoding.
+//   - aliases - specify alternative keys for annotations or labels loopkup. Can be used only with 'annotation' or 'label' tag. The tag have following syntax: 'aliases:value1;value2;value3'. Values should be a valid k8s annotation or label key.
 //
 // Encoding schemes:
 //   - json - field will deserialized/serialized with json decoder/encoder

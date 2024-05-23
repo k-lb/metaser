@@ -72,10 +72,16 @@ func (c *cache) build(root reflect.Value) error {
 				v := c.AnnotationFastAccess[pt.value]
 				v = append(v, item)
 				c.AnnotationFastAccess[pt.value] = v
+				for _, alias := range pt.aliases {
+					c.AnnotationFastAccess[alias] = v
+				}
 			case label:
 				v := c.LabelsFastAccess[pt.value]
 				v = append(v, item)
 				c.LabelsFastAccess[pt.value] = v
+				for _, alias := range pt.aliases {
+					c.LabelsFastAccess[alias] = v
+				}
 			case source(undefined):
 				if pt.enc == custom {
 					c.CustomFieldsFastAccess = append(c.CustomFieldsFastAccess, item)

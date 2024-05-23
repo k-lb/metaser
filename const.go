@@ -34,6 +34,7 @@ const (
 	keyValueSeparator = ":"
 	omitEmptyKey      = "omitempty"
 	immutableKey      = "immutable"
+	aliasesKey        = "aliases"
 )
 
 type source int
