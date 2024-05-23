@@ -33,6 +33,9 @@ type Encoder struct {
 	values []structField
 }
 
+// EncodeOption to be passed to Encode()
+type EncodeOption func(enc *Encoder)
+
 func encodeUsingTextMarshaler(in reflect.Value) (string, error) {
 	fun := method(in, "MarshalText")
 	if !fun.IsValid() || fun.IsZero() {
@@ -298,13 +301,17 @@ func appendFieldValues(values []structField, v reflect.Value) ([]structField, er
 // Encode reads data from v and writes it into K8s object metadata.
 //
 // See package documentation for details about serialization.
-func (enc *Encoder) Encode(v any, meta *metav1.ObjectMeta) error {
+func (enc *Encoder) Encode(v any, meta *metav1.ObjectMeta, options ...EncodeOption) error {
 	var err error
 	enc.out = meta
 	value := reflect.ValueOf(v)
 
 	if value.Kind() != reflect.Pointer {
 		return fmt.Errorf("expected pointer to value")
+	}
+
+	for _, opt := range options {
+		opt(enc)
 	}
 
 	if meta.Annotations == nil {
@@ -342,6 +349,6 @@ func NewEncoder() *Encoder {
 }
 
 // Marshal reads data from v and writes it into K8s object metadata using default Encoder.
-func Marshal(v any, meta *metav1.ObjectMeta) error {
-	return NewEncoder().Encode(v, meta)
+func Marshal(v any, meta *metav1.ObjectMeta, options ...EncodeOption) error {
+	return NewEncoder().Encode(v, meta, options...)
 }

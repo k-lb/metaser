@@ -667,8 +667,7 @@ var _ = Describe("Decoder with GenerateFieldsErrors enabled", func() {
 				},
 			}
 			dec := NewDecoder()
-			dec.AccumulateFieldErrors = true
-			err := dec.Decode(m, &s)
+			err := dec.Decode(m, &s, AccumulateFieldErrors())
 			Expect(err).To(HaveOccurred())
 			Expect(GetErrorList(err)).ToNot(BeNil())
 			Expect(GetErrorList(err)).To(HaveLen(3))
@@ -728,8 +727,7 @@ var _ = Describe("Decoder with ImmutabilityVerification enabled", func() {
 				},
 			}
 			dec := NewDecoder()
-			dec.AccumulateFieldErrors = true
-			err := dec.Validate(m, &s)
+			err := dec.Validate(m, &s, AccumulateFieldErrors())
 			Expect(err).To(HaveOccurred())
 			Expect(s.MyKey).To(Equal(2))
 			Expect(s.MyKey2).To(Equal(float32(3.0)))
@@ -764,8 +762,7 @@ var _ = Describe("Decoder with ImmutabilityVerification disabled", func() {
 			},
 		}
 		dec := NewDecoder()
-		dec.AccumulateFieldErrors = true
-		err := dec.Decode(m, &s)
+		err := dec.Decode(m, &s, AccumulateFieldErrors())
 		Expect(err).ToNot(HaveOccurred())
 		Expect(s.MyKey).To(Equal(1))
 		Expect(s.MyKey2).To(Equal(float32(2.0)))

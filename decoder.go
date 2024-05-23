@@ -34,14 +34,21 @@ import (
 type Decoder struct {
 	in *metav1.ObjectMeta
 
-	// indidacte if during Decode() the Decoder should generate ErrorList.
-	// The ErrorList can be obtained by GetErrorList() method called on returned error.
-	// Aditionally when True, the Decoder will not stop on first encountered deserialization error,
-	// but instead will traverse fields to gather all possible decoding errors.
-	AccumulateFieldErrors bool
+	accumulateFieldErrors bool
+	fieldErrors           field.ErrorList
+	cache                 cache
+}
 
-	fieldErrors field.ErrorList
-	cache       cache
+// DecodeOption to be passed to Decode()
+type DecodeOption func(dec *Decoder)
+
+// AccumulateFieldErrors enforces decoder to accumulate
+// all encountered decode errors instead of aborting on first found one.
+// the list of errors can be obtained with GetErrorList() function.
+func AccumulateFieldErrors() DecodeOption {
+	return func(dec *Decoder) {
+		dec.accumulateFieldErrors = true
+	}
 }
 
 func assignToBool(out reflect.Value, in string) error {
@@ -295,7 +302,7 @@ func (dec *Decoder) decodeField(tag *parsedTag, v reflect.Value) error {
 		err = decode(v, "", tag.enc, dec.in)
 	}
 
-	if err != nil && dec.AccumulateFieldErrors {
+	if err != nil && dec.accumulateFieldErrors {
 		dec.fieldErrors = append(dec.fieldErrors, field.TypeInvalid(field.NewPath("metadata").Child(tag.source.String()),
 			tag.value, err.Error()))
 		return nil
@@ -329,9 +336,10 @@ func fieldByIndexWithAlloc(v reflect.Value, index []int) reflect.Value {
 // Decode reads data from K8s object metadata and stores them in v.
 //
 // See package documentation for details about deserialization.
-func (dec *Decoder) Decode(meta *metav1.ObjectMeta, v any) error {
+func (dec *Decoder) Decode(meta *metav1.ObjectMeta, v any, options ...DecodeOption) error {
 	dec.in = meta
 	dec.fieldErrors = field.ErrorList{}
+	dec.accumulateFieldErrors = false
 
 	root := reflect.ValueOf(v)
 
@@ -344,6 +352,10 @@ func (dec *Decoder) Decode(meta *metav1.ObjectMeta, v any) error {
 	}
 
 	root = dereference(root)
+
+	for _, opt := range options {
+		opt(dec)
+	}
 
 	for _, info := range dec.cache.NameFastAccess {
 		if err := dec.decodeField(&info.tag, fieldByIndexWithAlloc(root, info.path)); err != nil {
@@ -392,7 +404,7 @@ func (dec *Decoder) Decode(meta *metav1.ObjectMeta, v any) error {
 
 // Validates validates if ObjectMeta contains data that may break invariants
 // specified in metaser tags defined on v.
-func (dec *Decoder) Validate(meta *metav1.ObjectMeta, v any) error {
+func (dec *Decoder) Validate(meta *metav1.ObjectMeta, v any, options ...DecodeOption) error {
 	dec.in = meta
 	dec.fieldErrors = field.ErrorList{}
 	var err error
@@ -409,6 +421,10 @@ func (dec *Decoder) Validate(meta *metav1.ObjectMeta, v any) error {
 
 	root = dereference(root)
 
+	for _, opt := range options {
+		opt(dec)
+	}
+
 	for _, info := range dec.cache.ImmutableFieldsFastAccess {
 		t := root.Type().FieldByIndex(info.path)
 		v := fieldByIndexWithAlloc(root, info.path)
@@ -419,7 +435,7 @@ func (dec *Decoder) Validate(meta *metav1.ObjectMeta, v any) error {
 		if !dec.equal(v, cv) {
 			err = errors.Join(err, fmt.Errorf("field is immutable"))
 		}
-		if err != nil && dec.AccumulateFieldErrors {
+		if err != nil && dec.accumulateFieldErrors {
 			dec.fieldErrors = append(dec.fieldErrors, field.TypeInvalid(field.NewPath("metadata").Child(info.tag.source.String()),
 				info.tag.value, err.Error()))
 			continue
@@ -442,6 +458,6 @@ func NewDecoder() *Decoder {
 }
 
 // Unmarshal reads data from K8s object metadata using default Decoder.
-func Unmarshal(meta *metav1.ObjectMeta, v any) error {
-	return NewDecoder().Decode(meta, v)
+func Unmarshal(meta *metav1.ObjectMeta, v any, options ...DecodeOption) error {
+	return NewDecoder().Decode(meta, v, options...)
 }
