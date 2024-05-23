@@ -21,9 +21,9 @@ import (
 )
 
 type MetadataUnmarshaler interface {
-	UnmarshalFromMetadata(meta *metav1.ObjectMeta) error
+	UnmarshalFromMetadata(meta metav1.Object) error
 }
 
 type MetadataMarshaler interface {
-	MarshalToMetadata(meta *metav1.ObjectMeta) error
+	MarshalToMetadata(meta metav1.Object) error
 }

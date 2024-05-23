@@ -29,7 +29,11 @@ import (
 
 // Encoder encodes and writes data into Kubernets Object's metatdata
 type Encoder struct {
-	out    *metav1.ObjectMeta
+	meta metav1.Object
+	out  struct {
+		Labels      map[string]string
+		Annotations map[string]string
+	}
 	values []structField
 }
 
@@ -200,7 +204,7 @@ func encodePrimitive(in reflect.Value) (out string, err error) {
 	return out, err
 }
 
-func encode(in reflect.Value, enc encoder, meta *metav1.ObjectMeta) (string, error) {
+func encode(in reflect.Value, enc encoder, meta metav1.Object) (string, error) {
 	switch enc {
 	case encoder(undefined):
 		return encodeUndefined(in)
@@ -213,7 +217,7 @@ func encode(in reflect.Value, enc encoder, meta *metav1.ObjectMeta) (string, err
 	}
 }
 
-func encodeCustom(out reflect.Value, meta *metav1.ObjectMeta) error {
+func encodeCustom(out reflect.Value, meta metav1.Object) error {
 	var fun reflect.Value
 
 	if out.Kind() == reflect.Pointer && out.IsNil() {
@@ -257,22 +261,22 @@ func (enc *Encoder) encodeField(dv *structField) error {
 	switch dv.tag.source {
 	case name:
 		if val, err = encodePrimitive(dv.value); err == nil {
-			enc.out.Name = val
+			enc.meta.SetName(val)
 		}
 	case namespace:
 		if val, err = encodePrimitive(dv.value); err == nil {
-			enc.out.Namespace = val
+			enc.meta.SetNamespace(val)
 		}
 	case label:
-		if val, err = encode(dv.value, dv.tag.enc, enc.out); err == nil {
+		if val, err = encode(dv.value, dv.tag.enc, enc.meta); err == nil {
 			enc.out.Labels[dv.tag.value] = val
 		}
 	case annotation:
-		if val, err = encode(dv.value, dv.tag.enc, enc.out); err == nil {
+		if val, err = encode(dv.value, dv.tag.enc, enc.meta); err == nil {
 			enc.out.Annotations[dv.tag.value] = val
 		}
 	case source(undefined):
-		_, err = encode(dv.value, dv.tag.enc, enc.out)
+		_, err = encode(dv.value, dv.tag.enc, enc.meta)
 	}
 
 	return err
@@ -301,10 +305,13 @@ func appendFieldValues(values []structField, v reflect.Value) ([]structField, er
 // Encode reads data from v and writes it into K8s object metadata.
 //
 // See package documentation for details about serialization.
-func (enc *Encoder) Encode(v any, meta *metav1.ObjectMeta, options ...EncodeOption) error {
+func (enc *Encoder) Encode(v any, meta metav1.Object, options ...EncodeOption) error {
 	var err error
-	enc.out = meta
+	enc.meta = meta
 	value := reflect.ValueOf(v)
+
+	// clean-up meta reference to avoid leak.
+	defer func() { *enc = Encoder{} }()
 
 	if value.Kind() != reflect.Pointer {
 		return fmt.Errorf("expected pointer to value")
@@ -314,12 +321,16 @@ func (enc *Encoder) Encode(v any, meta *metav1.ObjectMeta, options ...EncodeOpti
 		opt(enc)
 	}
 
-	if meta.Annotations == nil {
-		meta.Annotations = map[string]string{}
+	enc.out.Annotations = meta.GetAnnotations()
+	if enc.out.Annotations == nil {
+		enc.out.Annotations = map[string]string{}
+		meta.SetAnnotations(enc.out.Annotations)
 	}
 
-	if meta.Labels == nil {
-		meta.Labels = map[string]string{}
+	enc.out.Labels = meta.GetLabels()
+	if enc.out.Labels == nil {
+		enc.out.Labels = map[string]string{}
+		meta.SetLabels(enc.out.Labels)
 	}
 
 	enc.values, err = appendFieldValues(enc.values, value)
@@ -340,6 +351,7 @@ func (enc *Encoder) Encode(v any, meta *metav1.ObjectMeta, options ...EncodeOpti
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -349,6 +361,6 @@ func NewEncoder() *Encoder {
 }
 
 // Marshal reads data from v and writes it into K8s object metadata using default Encoder.
-func Marshal(v any, meta *metav1.ObjectMeta, options ...EncodeOption) error {
+func Marshal(v any, meta metav1.Object, options ...EncodeOption) error {
 	return NewEncoder().Encode(v, meta, options...)
 }

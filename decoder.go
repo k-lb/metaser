@@ -32,7 +32,7 @@ import (
 
 // Decoder reads and decodes data from Kubernets Resource metatdata
 type Decoder struct {
-	meta        *metav1.ObjectMeta
+	meta        metav1.Object
 	fieldErrors field.ErrorList
 	cache       cache
 	root        reflect.Value
@@ -265,7 +265,7 @@ func decodeJson(out reflect.Value, in string) error {
 	return json.Unmarshal([]byte(in), out.Interface())
 }
 
-func decodeCustom(out reflect.Value, meta *metav1.ObjectMeta) error {
+func decodeCustom(out reflect.Value, meta metav1.Object) error {
 	var fun reflect.Value
 
 	if out.Kind() == reflect.Pointer && out.IsNil() {
@@ -308,7 +308,7 @@ func match(values map[string]string, tag *parsedTag) string {
 	return ""
 }
 
-func (dec *Decoder) decodeField(meta *metav1.ObjectMeta, tag *parsedTag, v reflect.Value) error {
+func (dec *Decoder) decodeField(meta metav1.Object, tag *parsedTag, v reflect.Value) error {
 	var err error
 
 	if tag == nil || tag.dir == out {
@@ -322,13 +322,13 @@ func (dec *Decoder) decodeField(meta *metav1.ObjectMeta, tag *parsedTag, v refle
 
 	switch tag.source {
 	case name:
-		err = decodePrimitive(v, meta.Name)
+		err = decodePrimitive(v, meta.GetName())
 	case namespace:
-		err = decodePrimitive(v, meta.Namespace)
+		err = decodePrimitive(v, meta.GetNamespace())
 	case label:
-		err = decode(v, match(meta.Labels, tag), tag.enc)
+		err = decode(v, match(meta.GetLabels(), tag), tag.enc)
 	case annotation:
-		err = decode(v, match(meta.Annotations, tag), tag.enc)
+		err = decode(v, match(meta.GetAnnotations(), tag), tag.enc)
 	case source(undefined):
 		err = decodeCustom(v, meta)
 	}
@@ -398,14 +398,14 @@ func (dec *Decoder) iterate(fn func(info *fieldInfo) error) error {
 			return err
 		}
 	}
-	for k := range dec.meta.Annotations {
+	for k := range dec.meta.GetAnnotations() {
 		for _, info := range dec.cache.AnnotationFastAccess[k] {
 			if err := fn(&info); err != nil {
 				return err
 			}
 		}
 	}
-	for k := range dec.meta.Labels {
+	for k := range dec.meta.GetLabels() {
 		for _, info := range dec.cache.LabelsFastAccess[k] {
 			if err := fn(&info); err != nil {
 				return err
@@ -426,7 +426,7 @@ func (dec *Decoder) iterate(fn func(info *fieldInfo) error) error {
 // Decode reads data from K8s object metadata and stores them in v.
 //
 // See package documentation for details about deserialization.
-func (dec *Decoder) Decode(meta *metav1.ObjectMeta, v any, options ...DecodeOption) error {
+func (dec *Decoder) Decode(meta metav1.Object, v any, options ...DecodeOption) error {
 	// default values
 	dec.fieldErrors = field.ErrorList{}
 	dec.performValidation = false
@@ -434,6 +434,9 @@ func (dec *Decoder) Decode(meta *metav1.ObjectMeta, v any, options ...DecodeOpti
 	dec.skipDefaultWorkload = false
 	dec.meta = meta
 	dec.filter = nil
+
+	// clean-up meta reference to avoid leak.
+	defer func() { *dec = Decoder{} }()
 
 	root := reflect.ValueOf(v)
 
@@ -466,7 +469,7 @@ func (dec *Decoder) Decode(meta *metav1.ObjectMeta, v any, options ...DecodeOpti
 	return nil
 }
 
-func (dec *Decoder) validateField(meta *metav1.ObjectMeta, tag *parsedTag, v reflect.Value) error {
+func (dec *Decoder) validateField(meta metav1.Object, tag *parsedTag, v reflect.Value) error {
 	var err error
 
 	// in case when setonce is used, we first check if refence values is zero. When yes
@@ -505,6 +508,6 @@ func NewDecoder() *Decoder {
 }
 
 // Unmarshal reads data from K8s object metadata using default Decoder.
-func Unmarshal(meta *metav1.ObjectMeta, v any, options ...DecodeOption) error {
+func Unmarshal(meta metav1.Object, v any, options ...DecodeOption) error {
 	return NewDecoder().Decode(meta, v, options...)
 }
