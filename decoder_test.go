@@ -798,6 +798,26 @@ var _ = Describe("immutablity checks", func() {
 		Expect(s.MyKey4).To(Equal("hello"))
 		Expect(s.MyKey5).To(Equal("test"))
 	})
+	It("should allow to decode immutable field when setonce is set", func() {
+		s := struct {
+			MyKey int `k8s:"annotation:one,setonce"`
+		}{
+			MyKey: 0,
+		}
+		m := &metav1.ObjectMeta{
+			Annotations: map[string]string{
+				"one": "1",
+			},
+		}
+		dec := NewDecoder()
+		err := dec.Decode(m, &s, Validate(true))
+		Expect(err).ToNot(HaveOccurred())
+		Expect(s.MyKey).To(Equal(1))
+
+		m.Annotations["one"] = "2"
+		err = dec.Decode(m, &s, Validate(true))
+		Expect(err).To(HaveOccurred())
+	})
 })
 
 var _ = Describe("Decoding embedded structs", func() {

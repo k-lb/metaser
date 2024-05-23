@@ -35,6 +35,7 @@ const (
 	omitEmptyKey      = "omitempty"
 	immutableKey      = "immutable"
 	aliasesKey        = "aliases"
+	setOnceKey        = "setonce"
 )
 
 type source int

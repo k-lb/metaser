@@ -76,7 +76,7 @@ func Validate(enabled bool) DecodeOption {
 func DecodeImmutablesOnly() DecodeOption {
 	return func(dec *Decoder) {
 		dec.skipDefaultWorkload = false
-		dec.filter = func(fi *fieldInfo) bool { return fi.tag.immutable }
+		dec.filter = func(fi *fieldInfo) bool { return fi.tag.immutable || fi.tag.setOnce }
 	}
 }
 
@@ -469,8 +469,14 @@ func (dec *Decoder) Decode(meta *metav1.ObjectMeta, v any, options ...DecodeOpti
 func (dec *Decoder) validateField(meta *metav1.ObjectMeta, tag *parsedTag, v reflect.Value) error {
 	var err error
 
+	// in case when setonce is used, we first check if refence values is zero. When yes
+	// it is not required to validate equality
+	if tag.setOnce && v.IsZero() {
+		return nil
+	}
+
 	// perform equality check
-	if tag.immutable {
+	if tag.setOnce || tag.immutable {
 		cv := reflect.New(v.Type()).Elem()
 		if err = dec.decodeField(meta, tag, cv); err != nil {
 			return fmt.Errorf("unable to decode value: [%w]", err)

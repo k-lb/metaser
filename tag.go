@@ -32,6 +32,7 @@ type parsedTag struct {
 	omitempty bool
 	immutable bool
 	aliases   []string
+	setOnce   bool
 }
 
 func parseEncoding(expr string) (encoder, error) {
@@ -90,6 +91,8 @@ func parseTag(tag reflect.StructTag) (pt *parsedTag, err error) {
 			pt.omitempty = true
 		case immutableKey:
 			pt.immutable = true
+		case setOnceKey:
+			pt.setOnce = true
 		default:
 			// handle key:value pairs
 			keyvals := strings.Split(f, ":")
