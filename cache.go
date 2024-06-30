@@ -34,18 +34,16 @@ type cache struct {
 	CustomFieldsFastAccess []fieldInfo
 }
 
-func (c *cache) build(root reflect.Value) error {
-	if c.CachedType == root.Type() {
-		return nil
-	}
+func newCache(root reflect.Type) (*cache, error) {
 
+	c := &cache{}
 	c.AnnotationFastAccess = map[string][]fieldInfo{}
 	c.LabelsFastAccess = map[string][]fieldInfo{}
 	c.CustomFieldsFastAccess = nil
 	c.NameFastAccess = nil
 	c.NamespaceFastAccess = nil
 
-	err := visit(root.Type(), func(t reflect.Type, path []int) (bool, error) {
+	err := visit(root, func(t reflect.Type, path []int) (bool, error) {
 		if t.Kind() == reflect.Pointer {
 			return true, nil
 		}
@@ -92,7 +90,7 @@ func (c *cache) build(root reflect.Value) error {
 		return recurse, nil
 	})
 	if err == nil {
-		c.CachedType = root.Type()
+		c.CachedType = root
 	}
-	return err
+	return c, err
 }
