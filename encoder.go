@@ -28,7 +28,10 @@ import (
 )
 
 // Encoder encodes and writes data into Kubernets Object's metatdata
-type Encoder struct {
+type Encoder struct{}
+
+// internal struct represents context of encoding operation.
+type encodeContext struct {
 	meta metav1.Object
 	out  struct {
 		Labels      map[string]string
@@ -38,7 +41,7 @@ type Encoder struct {
 }
 
 // EncodeOption to be passed to Encode()
-type EncodeOption func(enc *Encoder)
+type EncodeOption func(enc *encodeContext)
 
 func encodeUsingTextMarshaler(in reflect.Value) (string, error) {
 	fun := method(in, "MarshalText")
@@ -238,7 +241,7 @@ func encodeCustom(out reflect.Value, meta metav1.Object) error {
 	return nil
 }
 
-func (enc *Encoder) encodeField(dv *structField) error {
+func encodeField(ec *encodeContext, dv *structField) error {
 	var val string
 	var err error
 
@@ -251,9 +254,9 @@ func (enc *Encoder) encodeField(dv *structField) error {
 	if dv.tag.omitempty && dv.value.IsZero() {
 		switch dv.tag.source {
 		case label:
-			delete(enc.out.Labels, dv.tag.value)
+			delete(ec.out.Labels, dv.tag.value)
 		case annotation:
-			delete(enc.out.Annotations, dv.tag.value)
+			delete(ec.out.Annotations, dv.tag.value)
 		}
 		return nil
 	}
@@ -261,22 +264,22 @@ func (enc *Encoder) encodeField(dv *structField) error {
 	switch dv.tag.source {
 	case name:
 		if val, err = encodePrimitive(dv.value); err == nil {
-			enc.meta.SetName(val)
+			ec.meta.SetName(val)
 		}
 	case namespace:
 		if val, err = encodePrimitive(dv.value); err == nil {
-			enc.meta.SetNamespace(val)
+			ec.meta.SetNamespace(val)
 		}
 	case label:
-		if val, err = encode(dv.value, dv.tag.enc, enc.meta); err == nil {
-			enc.out.Labels[dv.tag.value] = val
+		if val, err = encode(dv.value, dv.tag.enc, ec.meta); err == nil {
+			ec.out.Labels[dv.tag.value] = val
 		}
 	case annotation:
-		if val, err = encode(dv.value, dv.tag.enc, enc.meta); err == nil {
-			enc.out.Annotations[dv.tag.value] = val
+		if val, err = encode(dv.value, dv.tag.enc, ec.meta); err == nil {
+			ec.out.Annotations[dv.tag.value] = val
 		}
 	case source(undefined):
-		_, err = encode(dv.value, dv.tag.enc, enc.meta)
+		_, err = encode(dv.value, dv.tag.enc, ec.meta)
 	}
 
 	return err
@@ -305,48 +308,48 @@ func appendFieldValues(values []structField, v reflect.Value) ([]structField, er
 // Encode reads data from v and writes it into K8s object metadata.
 //
 // See package documentation for details about serialization.
-func (enc *Encoder) Encode(v any, meta metav1.Object, options ...EncodeOption) error {
+func (*Encoder) Encode(v any, meta metav1.Object, options ...EncodeOption) error {
 	var err error
-	enc.meta = meta
 	value := reflect.ValueOf(v)
-
-	// clean-up meta reference to avoid leak.
-	defer func() { *enc = Encoder{} }()
 
 	if value.Kind() != reflect.Pointer {
 		return fmt.Errorf("expected pointer to value")
 	}
 
+	ec := &encodeContext{
+		meta: meta,
+	}
+
 	for _, opt := range options {
-		opt(enc)
+		opt(ec)
 	}
 
-	enc.out.Annotations = meta.GetAnnotations()
-	if enc.out.Annotations == nil {
-		enc.out.Annotations = map[string]string{}
-		meta.SetAnnotations(enc.out.Annotations)
+	ec.out.Annotations = meta.GetAnnotations()
+	if ec.out.Annotations == nil {
+		ec.out.Annotations = map[string]string{}
+		meta.SetAnnotations(ec.out.Annotations)
 	}
 
-	enc.out.Labels = meta.GetLabels()
-	if enc.out.Labels == nil {
-		enc.out.Labels = map[string]string{}
-		meta.SetLabels(enc.out.Labels)
+	ec.out.Labels = meta.GetLabels()
+	if ec.out.Labels == nil {
+		ec.out.Labels = map[string]string{}
+		meta.SetLabels(ec.out.Labels)
 	}
 
-	enc.values, err = appendFieldValues(enc.values, value)
+	ec.values, err = appendFieldValues(ec.values, value)
 	if err != nil {
 		return err
 	}
 
-	for len(enc.values) > 0 {
-		v := enc.values[len(enc.values)-1]
-		enc.values = enc.values[:len(enc.values)-1]
-		if err = enc.encodeField(&v); err != nil {
+	for len(ec.values) > 0 {
+		v := ec.values[len(ec.values)-1]
+		ec.values = ec.values[:len(ec.values)-1]
+		if err = encodeField(ec, &v); err != nil {
 			return fmt.Errorf("unable to process value: [%w]", err)
 		}
 
 		if v.tag != nil && v.tag.inline {
-			if enc.values, err = appendFieldValues(enc.values, v.value); err != nil {
+			if ec.values, err = appendFieldValues(ec.values, v.value); err != nil {
 				return err
 			}
 		}
